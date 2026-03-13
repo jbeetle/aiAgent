@@ -1,0 +1,64 @@
+{
+  "name": "code_review",
+  "version": "1.0.0",
+  "description": "对代码文件进行自动化审查，检查代码质量、潜在问题和改进建议",
+  "author": "ReAct Agent Framework",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "代码文件的绝对路径"
+      },
+      "language": {
+        "type": "string",
+        "description": "编程语言（如javascript、python、java等）"
+      },
+      "review_focus": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["security", "performance", "readability", "maintainability", "best_practices"]
+        },
+        "default": ["readability", "maintainability", "best_practices"],
+        "description": "审查重点关注的方面"
+      }
+    },
+    "required": ["file_path"]
+  },
+  "workflow": {
+    "steps": [
+      {
+        "id": "read_code",
+        "type": "tool",
+        "tool": "file_reader",
+        "input": {
+          "path": "{{parameters.file_path}}"
+        }
+      },
+      {
+        "id": "review_code",
+        "type": "llm",
+        "prompt": "请对以下{{parameters.language}}代码进行专业审查，重点关注：{{parameters.review_focus}}\n\n代码内容：\n```{{parameters.language}}\n{{steps.read_code.output}}\n```\n\n请按以下结构输出审查报告：\n\n## 总体评价\n- 代码质量评分（1-10）\n- 主要优点\n- 主要问题\n\n## 详细审查\n### 1. {{parameters.review_focus}}方面的问题\n- 列出具体问题及位置\n- 给出改进建议\n\n## 改进建议\n1. 优先级高的修改项\n2. 代码优化建议\n3. 最佳实践参考",
+        "output_key": "review_report"
+      }
+    ]
+  },
+  "knowledge": {
+    "examples": [
+      {
+        "input": {
+          "file_path": "/src/app.js",
+          "language": "javascript",
+          "review_focus": ["security", "performance"]
+        },
+        "description": "审查JavaScript代码的安全性和性能"
+      }
+    ],
+    "best_practices": [
+      "安全性审查关注输入验证、SQL注入、XSS等",
+      "性能审查关注算法复杂度、资源泄漏等",
+      "可读性审查关注命名规范、注释质量等"
+    ]
+  }
+}

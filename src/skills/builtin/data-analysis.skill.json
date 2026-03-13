@@ -1,0 +1,68 @@
+{
+  "name": "data_analysis",
+  "version": "1.0.0",
+  "description": "分析数据文件并生成摘要报告，支持CSV、JSON等格式的数据分析",
+  "author": "ReAct Agent Framework",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "数据文件的绝对路径"
+      },
+      "analysis_type": {
+        "type": "string",
+        "enum": ["summary", "trend", "correlation", "distribution"],
+        "description": "分析类型：summary(摘要统计)、trend(趋势分析)、correlation(相关性分析)、distribution(分布分析)"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": ["markdown", "json", "text"],
+        "default": "markdown",
+        "description": "报告输出格式"
+      }
+    },
+    "required": ["file_path", "analysis_type"]
+  },
+  "workflow": {
+    "steps": [
+      {
+        "id": "read_file",
+        "type": "tool",
+        "tool": "file_reader",
+        "input": {
+          "path": "{{parameters.file_path}}"
+        }
+      },
+      {
+        "id": "analyze_data",
+        "type": "llm",
+        "prompt": "请对以下数据进行{{parameters.analysis_type}}分析，生成详细报告：\n\n{{steps.read_file.output}}\n\n要求：\n1. 提供数据概览和关键指标\n2. 根据分析类型提供深入洞察\n3. 使用清晰的格式组织内容\n4. 如有异常值或重要发现请特别标注",
+        "output_key": "analysis_report"
+      },
+      {
+        "id": "format_output",
+        "type": "llm",
+        "condition": "{{parameters.output_format}} !== 'markdown'",
+        "prompt": "将以下报告转换为{{parameters.output_format}}格式：\n\n{{steps.analyze_data.output}}",
+        "output_key": "formatted_report"
+      }
+    ]
+  },
+  "knowledge": {
+    "examples": [
+      {
+        "input": {
+          "file_path": "/data/sales.csv",
+          "analysis_type": "trend"
+        },
+        "description": "分析销售数据的趋势变化"
+      }
+    ],
+    "best_practices": [
+      "对于大数据文件，建议先进行采样分析",
+      "趋势分析适用于时间序列数据",
+      "相关性分析需要至少两个数值列"
+    ]
+  }
+}
