@@ -1,5 +1,7 @@
 # ReAct Agent Framework
 
+> [English](README.en.md) | 中文
+
 基于 JavaScript 的 AI 代理框架，实现了 ReAct（推理+行动）模式，支持多种大语言模型 API。该框架使 AI 代理能够将复杂任务分解为推理步骤，并执行外部工具/操作来完成目标。
 
 ## 🚀 主要特性
