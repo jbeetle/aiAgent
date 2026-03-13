@@ -1,0 +1,10 @@
+node_modules/
+.gitignore
+CLAUDE.md
+.env
+package-lock.json
+yarn.lock
+优化建议.md
+.trae
+.idea
+.claude
