@@ -135,6 +135,37 @@ export class IntentRecognizer {
     }
 
     /**
+     * 获取技能的增强描述（包含 capabilities）
+     * @private
+     */
+    #getSkillEnhancedDescription(skill) {
+        let description = skill.description || 'No description';
+
+        // 添加 capabilities 到描述
+        if (skill.capabilities && skill.capabilities.length > 0) {
+            description += `\nCapabilities: ${skill.capabilities.join(', ')}`;
+        }
+
+        // 添加 category 和 tags
+        if (skill.category) {
+            description += `\nCategory: ${skill.category}`;
+        }
+        if (skill.tags && skill.tags.length > 0) {
+            description += `\nTags: ${skill.tags.join(', ')}`;
+        }
+
+        // 添加 input/output
+        if (skill.input && skill.input.length > 0) {
+            description += `\nInput: ${skill.input.join(', ')}`;
+        }
+        if (skill.output && skill.output.length > 0) {
+            description += `\nOutput: ${skill.output.join(', ')}`;
+        }
+
+        return description;
+    }
+
+    /**
      * 识别用户意图
      * @param {string} input - 用户输入
      * @returns {Promise<IntentRecognitionResult>}
@@ -447,12 +478,13 @@ export class IntentRecognizer {
             }).join('\n');
         }
 
-        // 构建 Skill 描述
+        // 构建 Skill 描述（使用增强描述，包含 capabilities）
         let skillDescriptions = '';
         if (this.#skills.length > 0 && this.#config.useSkillDescriptions) {
-            skillDescriptions = this.#skills.map((skill, idx) =>
-                `${idx + 1}. ${skill.name}: ${skill.description || 'No description'}`
-            ).join('\n');
+            skillDescriptions = this.#skills.map((skill, idx) => {
+                const enhancedDesc = this.#getSkillEnhancedDescription(skill);
+                return `${idx + 1}. ${skill.name}: ${enhancedDesc}`;
+            }).join('\n\n');
         }
 
         if (isCN) {
@@ -466,7 +498,7 @@ ${skillDescriptions ? `\n可用技能列表：\n${skillDescriptions}\n` : ''}
 请分析：
 1. 用户的真实意图是什么？
 2. 是否需要调用工具或技能来完成这个请求？
-3. 如果需要，哪些工具或技能最相关？
+3. 如果需要，哪些工具或技能最相关？（请参考技能的 capabilities 和 category）
 4. 如果不需要，为什么？
 
 请以 JSON 格式回复（不要包含任何其他文字）：
@@ -477,7 +509,7 @@ ${skillDescriptions ? `\n可用技能列表：\n${skillDescriptions}\n` : ''}
   "tool_analysis": [
     {"tool": "tool_name", "relevance": 0.85, "reason": "为什么相关"}
   ],
-  "suggested_tools": ["建议调用的工具名称"],
+  "suggested_tools": ["建议调用的工具/技能名称"],
   "intent_summary": "用户意图摘要"
 }`;
         } else {
@@ -491,7 +523,7 @@ User input: """${input}"""
 Please analyze:
 1. What is the user's real intent?
 2. Do we need to call tools or skills to fulfill this request?
-3. If yes, which tools or skills are most relevant?
+3. If yes, which tools or skills are most relevant? (Consider capabilities and category)
 4. If no, why not?
 
 Please respond in JSON format (no other text):
@@ -502,7 +534,7 @@ Please respond in JSON format (no other text):
   "tool_analysis": [
     {"tool": "tool_name", "relevance": 0.85, "reason": "why relevant"}
   ],
-  "suggested_tools": ["suggested tool names"],
+  "suggested_tools": ["suggested tool/skill names"],
   "intent_summary": "summary of user intent"
 }`;
         }
