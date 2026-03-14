@@ -69,17 +69,6 @@ The framework exports four main namespaces from `src/index.js`:
 - Provides unified `chat()` and `streamChat()` interfaces
 - Manages tool registration and routing decisions
 
-**ReActAgent** (`react.agent.js`): The core agent implementing the ReAct pattern.
-- Uses a loop that alternates between LLM reasoning and tool execution
-- Parses LLM responses to extract Thought, Action, Action Input, and Final Answer
-- Two modes: `run()` (non-streaming) and `runStream()` (streaming with callbacks)
-- Default config: `maxIterations: 5`, `max_tokens: 1042`
-
-**PromptFactory** (`utils/prompt.factory.js`): Manages multilingual prompt templates.
-- Supports 'cn' (Chinese) and 'en' (English) via `PROMPTS_LANG` env var
-- Creates ReAct prompts dynamically based on available tools
-- Reads from `prompts.cn.js` or `prompts.en.js`
-
 ### 3. `Models` Namespace (`src/agents/models/`)
 
 **LLMClient** (`llm.client.js`): Unified client for LLM APIs.
