@@ -226,14 +226,25 @@ export class SkillManager {
    * @returns {Array} - 技能摘要列表
    */
   getSkillSummaries() {
-    return this.engine.getAllSkills().map(skill => ({
-      name: skill.name,
-      version: skill.version,
-      description: skill.description,
-      author: skill.author,
-      parameters: skill.parameters,
-      source: this.loadedSkills.get(skill.name)?.filePath || 'inline'
-    }));
+    return this.engine.getAllSkills().map(skill => {
+      const loadedInfo = this.loadedSkills.get(skill.name);
+      const isDescriptive = skill._type === 'descriptive' || loadedInfo?.isDescriptive;
+
+      return {
+        name: skill.name,
+        originalName: skill._originalName || skill.name,
+        type: isDescriptive ? 'descriptive' : 'executable',
+        version: skill.version,
+        description: skill.description,
+        author: skill.author,
+        category: skill.category,
+        tags: skill.tags || [],
+        capabilities: skill.capabilities || [],
+        parameters: skill.parameters,
+        source: loadedInfo?.filePath || 'inline',
+        isDescriptive
+      };
+    });
   }
 
   /**
