@@ -6,7 +6,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import {fileURLToPath} from 'url';
-import {validateSkill} from './skill.schema.js';
+import {validateSkill, detectSkillType, SkillType, convertToExecutableSkill} from './skill.schema.js';
 import {createLogger} from '../agents/utils/logger.js';
 
 /**
@@ -64,29 +64,49 @@ export class SkillManager {
       case '.js':
         skillDef = await this.#parseJS(filePath);
         break;
+      case '.md':
+      case '.markdown':
+        skillDef = this.#parseMarkdown(content, filePath);
+        break;
       default:
         throw new Error(`Unsupported skill file format: ${ext}`);
     }
 
-    // 验证技能定义
-    const validation = validateSkill(skillDef);
+    // 检测技能类型
+    const detectedType = detectSkillType(skillDef);
+    const isDescriptive = detectedType === SkillType.DESCRIPTIVE;
+
+    this.#log(`Detected skill type: ${detectedType} for ${skillDef.name}`);
+
+    // 验证技能定义（根据类型）
+    const validation = validateSkill(skillDef, { skillType: detectedType });
     if (!validation.valid) {
       throw new Error(`Invalid skill definition in ${filePath}: ${validation.errors.join(', ')}`);
     }
 
+    // 如果是描述性技能，自动转换为可执行技能
+    let executableSkillDef = skillDef;
+    if (isDescriptive) {
+      executableSkillDef = convertToExecutableSkill(skillDef);
+      this.#log(`Converted descriptive skill "${skillDef.name}" to executable skill "${executableSkillDef.name}"`);
+    }
+
     // 注册到引擎
-    this.engine.registerSkill(skillDef);
+    this.engine.registerSkill(executableSkillDef, { originalType: detectedType });
 
     // 记录加载信息
-    this.loadedSkills.set(skillDef.name, {
+    this.loadedSkills.set(executableSkillDef.name, {
       filePath,
-      definition: skillDef,
+      definition: executableSkillDef,
+      originalDefinition: skillDef,
+      skillType: detectedType,
+      isDescriptive,
       loadedAt: new Date().toISOString()
     });
 
-    this.#log(`Skill loaded successfully: ${skillDef.name} v${skillDef.version}`);
+    this.#log(`Skill loaded successfully: ${executableSkillDef.name} v${executableSkillDef.version} (${detectedType})`);
 
-    return skillDef;
+    return executableSkillDef;
   }
 
   /**
@@ -96,7 +116,7 @@ export class SkillManager {
    * @returns {Promise<Array>} - 加载的技能定义列表
    */
   async loadFromDirectory(dirPath, options = {}) {
-    const { recursive = false, pattern = /\.skill\.(json|yaml|yml|js)$/ } = options;
+    const { recursive = false, pattern = /\.skill\.(json|yaml|yml|js|md)$/ } = options;
 
     this.#log(`Loading skills from directory: ${dirPath}`);
 
@@ -320,6 +340,185 @@ export class SkillManager {
     } catch (error) {
       throw new Error(`Failed to import JS module ${filePath}: ${error.message}`);
     }
+  }
+
+  /**
+   * 解析 Markdown 文件
+   * 支持 YAML frontmatter 格式
+   * @param {string} content - Markdown 文件内容
+   * @param {string} filePath - 文件路径（用于错误提示）
+   * @returns {Object} - 解析后的技能定义
+   */
+  #parseMarkdown(content, filePath) {
+    try {
+      // 尝试解析 YAML frontmatter
+      const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+
+      if (frontmatterMatch) {
+        const yamlContent = frontmatterMatch[1];
+        const markdownBody = frontmatterMatch[2].trim();
+
+        let skillDef;
+
+        // 首先尝试作为 JSON 解析
+        try {
+          skillDef = JSON.parse(yamlContent);
+        } catch {
+          // 如果不是 JSON，尝试解析为 YAML
+          skillDef = this.#parseEnhancedYAML(yamlContent);
+        }
+
+        // 如果没有 description，使用 markdown body 作为描述
+        if (!skillDef.description && markdownBody) {
+          const firstParagraph = markdownBody.split('\n\n').find(p => p.trim());
+          if (firstParagraph) {
+            skillDef.description = firstParagraph.replace(/^#+\s*/, '').trim();
+          }
+        }
+
+        return skillDef;
+      }
+
+      throw new Error(
+        `No valid skill definition found in ${filePath}. ` +
+        `Markdown skill files should have YAML frontmatter (---\nyaml content\n---\n)`
+      );
+    } catch (error) {
+      if (error.message.includes('No valid skill definition')) {
+        throw error;
+      }
+      throw new Error(`Failed to parse Markdown file ${filePath}: ${error.message}`);
+    }
+  }
+
+  /**
+   * 增强的 YAML 解析器（支持业界标准的 YAML 结构）
+   * @param {string} yamlContent - YAML 内容
+   * @returns {Object} - 解析后的对象
+   */
+  #parseEnhancedYAML(yamlContent) {
+    const result = {};
+    const lines = yamlContent.split('\n');
+    const contextStack = [];
+    let currentObj = result;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmedLine = line.trim();
+
+      if (!trimmedLine || trimmedLine.startsWith('#')) {
+        continue;
+      }
+
+      const indent = line.search(/\S/);
+
+      if (trimmedLine.startsWith('- ')) {
+        const value = trimmedLine.substring(2).trim();
+
+        let arrayContext = null;
+        for (let j = contextStack.length - 1; j >= 0; j--) {
+          if (Array.isArray(contextStack[j].value)) {
+            arrayContext = contextStack[j];
+            break;
+          }
+        }
+
+        if (arrayContext) {
+          const objMatch = value.match(/^(\w+):\s*(.*)$/);
+          if (objMatch && !value.startsWith('{')) {
+            const key = objMatch[1];
+            const val = objMatch[2];
+            const lastItem = arrayContext.value[arrayContext.value.length - 1];
+            const expectedChildIndent = arrayContext.indent + 2;
+
+            if (indent >= expectedChildIndent && typeof lastItem === 'object' && lastItem !== null && !Array.isArray(lastItem)) {
+              lastItem[key] = val ? this.#parseYAMLValue(val) : null;
+            } else {
+              const newObj = { [key]: val ? this.#parseYAMLValue(val) : null };
+              arrayContext.value.push(newObj);
+            }
+          } else {
+            arrayContext.value.push(this.#parseYAMLValue(value));
+          }
+        }
+        continue;
+      }
+
+      const keyValueMatch = trimmedLine.match(/^(\w+):\s*(.*)$/);
+      if (keyValueMatch) {
+        const key = keyValueMatch[1];
+        let value = keyValueMatch[2];
+
+        while (contextStack.length > 0 && contextStack[contextStack.length - 1].indent >= indent) {
+          contextStack.pop();
+        }
+
+        currentObj = contextStack.length > 0 ? contextStack[contextStack.length - 1].value : result;
+        if (Array.isArray(currentObj)) {
+          const lastItem = currentObj[currentObj.length - 1];
+          if (lastItem && typeof lastItem === 'object') {
+            currentObj = lastItem;
+          }
+        }
+
+        if (value) {
+          currentObj[key] = this.#parseYAMLValue(value);
+        } else {
+          const nextLine = lines[i + 1];
+          if (nextLine) {
+            const nextTrimmed = nextLine.trim();
+            const nextIndent = nextLine.search(/\S/);
+
+            if (nextTrimmed.startsWith('- ')) {
+              currentObj[key] = [];
+              contextStack.push({ indent, value: currentObj[key], key });
+            } else if (nextIndent > indent) {
+              currentObj[key] = {};
+              contextStack.push({ indent, value: currentObj[key], key });
+            } else {
+              currentObj[key] = null;
+            }
+          } else {
+            currentObj[key] = null;
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 解析 YAML 值
+   * @param {string} value - 字符串值
+   * @returns {any} - 解析后的值
+   */
+  #parseYAMLValue(value) {
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    if (/^-?\d+$/.test(value)) {
+      return parseInt(value, 10);
+    }
+    if (/^-?\d+\.\d+$/.test(value)) {
+      return parseFloat(value);
+    }
+
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (value === 'null' || value === '~') return null;
+
+    if (value.startsWith('[') && value.endsWith(']')) {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value.slice(1, -1).split(',').map(s => s.trim());
+      }
+    }
+
+    return value;
   }
 }
 
