@@ -3,8 +3,8 @@
  * Fixed Social Media Influencer Joke-Telling Agent with Strict ReAct Format
  */
 
-import { Agent, Tools } from '../../src/index.js';
-import { influencerTools } from './influencer-tools.js';
+import {Agent} from '../../src/index.js';
+import {influencerTools} from './influencer-tools.js';
 import dotenv from 'dotenv';
 
 // 加载环境变量

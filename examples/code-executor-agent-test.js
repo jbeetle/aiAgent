@@ -2,7 +2,7 @@
  * Code Executor 工具与 ReActAgent 集成测试
  */
 
-import {Agent, Models, Tools} from '../src/index.js';
+import {Agent, Tools} from '../src/index.js';
 import dotenv from 'dotenv';
 
 // 加载环境变量

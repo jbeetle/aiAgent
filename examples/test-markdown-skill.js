@@ -3,11 +3,10 @@
  * 测试从 Markdown 文件加载 Skill
  */
 
-import { SkillEngine, SkillManager, validateSkill } from '../src/skills/index.js';
-import { getBuiltInTools } from '../src/agents/tools/tool.js';
-import { createLogger } from '../src/agents/utils/logger.js';
+import {SkillEngine, SkillManager, validateSkill} from '../src/skills/index.js';
+import {getBuiltInTools} from '../src/agents/tools/tool.js';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import {fileURLToPath} from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
