@@ -237,6 +237,32 @@ export class SkillManager {
   }
 
   /**
+   * 卸载技能
+   * @param {string} skillName - 技能名称
+   * @returns {Object} - 卸载的技能信息
+   */
+  unloadSkill(skillName) {
+    const info = this.loadedSkills.get(skillName);
+    if (!info) {
+      throw new Error(`Skill not found: ${skillName}`);
+    }
+
+    // 从引擎注销
+    this.engine.unregisterSkill(skillName);
+
+    // 从已加载列表中移除
+    this.loadedSkills.delete(skillName);
+
+    this.#log(`Skill unloaded: ${skillName}`);
+
+    return {
+      name: skillName,
+      filePath: info.filePath,
+      unloadedAt: new Date().toISOString()
+    };
+  }
+
+  /**
    * 解析 JSON
    * @param {string} content - JSON 字符串
    * @param {string} filePath - 文件路径（用于错误提示）

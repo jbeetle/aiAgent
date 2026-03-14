@@ -360,6 +360,32 @@ export class ReActAgent {
     }
 
     /**
+     * 卸载技能
+     * @param {string} skillName - 技能名称
+     * @returns {Object} - 卸载的技能信息
+     */
+    unloadSkill(skillName) {
+        return this.skillManager.unloadSkill(skillName);
+    }
+
+    /**
+     * 重新加载技能
+     * @param {string} skillName - 技能名称
+     * @returns {Promise<Object>} - 重新加载的技能定义
+     */
+    async reloadSkill(skillName) {
+        return await this.skillManager.reloadSkill(skillName);
+    }
+
+    /**
+     * 获取所有已加载技能的摘要信息
+     * @returns {Array} - 技能摘要列表
+     */
+    getSkillSummaries() {
+        return this.skillManager.getSkillSummaries();
+    }
+
+    /**
      * 重置对话历史
      */
     reset() {
