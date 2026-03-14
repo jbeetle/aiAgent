@@ -69,6 +69,8 @@ $ npm run cli
 Provider: DeepSeek
 Model:    deepseek-chat
 Skills:   0 loaded
+Context:  0 messages
+
 Type /help for commands or start chatting!
 
 > /builtin
@@ -202,12 +204,13 @@ Clear conversation history.
 ```
 
 #### `/history`
-Show current conversation history.
+Show current conversation history with message statistics and token usage status.
 
 ```
 > /history
 
 Conversation History:
+Messages: 4 | Token Estimate: 245 | Status: safe
 
 User: Please analyze my system information
 Agent: Here is the system analysis...
@@ -215,6 +218,11 @@ Agent: Here is the system analysis...
 User: Help me generate some code
 Agent: Sure, here is the generated code...
 ```
+
+**Status Description:**
+- `safe` - Token usage normal (< 70%)
+- `warning` - High token usage (70-90%)
+- `critical` - Token usage critical (> 90%), consider `/clear` to reset history
 
 #### `/model <vendor> <model>`
 Switch LLM model.
@@ -300,6 +308,75 @@ Exit the CLI program.
 > Explain the time complexity of this code
 📊 Final Answer: The time complexity of this code is O(n log n)...
 ```
+
+### Example 5: Context Preservation
+
+The CLI automatically preserves context across conversations:
+
+```bash
+> My name is John
+📊 Final Answer: Hello John! Nice to meet you!
+
+> What's my name?
+📊 Final Answer: You just told me your name is **John**!
+
+> Calculate 123 * 456
+🔧 Executing: calculator
+✅ Completed: calculator
+📊 Final Answer: 123 * 456 = 56088
+
+> What was the result of the calculation?
+📊 Final Answer: The result of the calculation was 56088
+```
+
+## CLI Architecture
+
+### Layered Architecture Design
+
+The CLI adopts a layered architecture that separates the conversation management layer from the task execution layer:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     CLI Interface Layer                      │
+│                   (bin/cli.js)                              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              BaseLLMService (Conversation Layer)            │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │  Responsibilities:                                     ││
+│  │  • Cross-conversation context management (SessionChat) ││
+│  │  • Intent recognition (keyword + LLM hybrid strategy)  ││
+│  │  • Smart routing (direct chat ↔ tool execution)        ││
+│  │  • Token estimation and history compression            ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌─────────────────────────┐      ┌──────────────────────────────┐
+│   Direct Chat (no tools) │      │   Tool Execution (ReActAgent)│
+│   SessionChat.chat()    │      │  • executeTask()              │
+│                         │      │  • executeTaskStream()        │
+│  Fast response for chat │      │  Stateless task executor      │
+└─────────────────────────┘      └──────────────────────────────┘
+```
+
+### Context Management
+
+- **Sliding Window**: Automatically keeps the most recent 20 messages
+- **Token Compression**: Automatically compresses history when threshold exceeded
+- **Intent Recognition**: Automatically determines if tools need to be called
+
+### Intent Recognition Strategy
+
+1. **Keyword Quick Match** (high confidence)
+   - calculate/query/get → needs tools
+   - hello/thanks/goodbye → direct chat
+
+2. **LLM Confirmation** (low confidence)
+   - LLM determines if tools are needed for ambiguous inputs
 
 ## Environment Configuration
 
@@ -445,6 +522,14 @@ node bin/cli.js -s ./skills
 ```
 
 ## Changelog
+
+### v2.1.0
+- ✨ Architecture upgrade: Separated conversation layer and task execution layer
+- ✨ Added BaseLLMService for cross-conversation context management
+- ✨ Smart intent recognition (keyword + LLM hybrid strategy)
+- ✨ Enhanced `/history` command with token usage statistics
+- ✨ Context preservation: Automatic memory across tool invocations
+- ✨ Added `executeTask()` / `executeTaskStream()` methods
 
 ### v2.0.1
 - ✨ Added interactive CLI tool
