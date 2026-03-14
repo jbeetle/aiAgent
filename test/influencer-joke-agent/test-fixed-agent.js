@@ -3,7 +3,7 @@
  * Test Fixed Influencer Joke Agent
  */
 
-import { createFixedInfluencerJokeAgent } from './fixed-influencer-joke-agent.js';
+import {createFixedInfluencerJokeAgent} from './fixed-influencer-joke-agent.js';
 import dotenv from 'dotenv';
 
 // 加载环境变量

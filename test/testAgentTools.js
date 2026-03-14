@@ -1,7 +1,4 @@
-import {Agent, Models, Tools, Skills} from '../src/index.js';
-import dotenv from 'dotenv';
-import {fileURLToPath} from 'url';
-import path from 'path';
+import {Agent, Tools} from '../src/index.js';
 
 async function example3_agentWithSkills() {
     // 检查环境变量

@@ -4,7 +4,7 @@
  * 本示例展示如何使用代码执行工具让AI智能体动态编写和执行代码
  */
 
-import {Agent, Models, Tools} from '../src/index.js';
+import {Agent, Tools} from '../src/index.js';
 import dotenv from 'dotenv';
 
 // 加载环境变量

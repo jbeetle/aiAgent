@@ -8,7 +8,7 @@
  * 4. 直接执行技能
  */
 
-import {Agent, Models, Tools, Skills} from '../src/index.js';
+import {Agent, Models, Skills, Tools} from '../src/index.js';
 import dotenv from 'dotenv';
 import {fileURLToPath} from 'url';
 import path from 'path';

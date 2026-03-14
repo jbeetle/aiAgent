@@ -3,8 +3,8 @@
  * Debug Agent Execution Process
  */
 
-import { Agent } from '../src/index.js';
-import { influencerTools } from './influencer-joke-agent/influencer-tools.js';
+import {Agent} from '../src/index.js';
+import {influencerTools} from './influencer-joke-agent/influencer-tools.js';
 import dotenv from 'dotenv';
 
 // 加载环境变量
