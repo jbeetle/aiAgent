@@ -135,7 +135,7 @@ class CLIAgent {
                 this.tools,
                 {
                     verbose: this.options.verbose,
-                    maxIterations: 10
+                    maxIterations: 15
                 }
             );
 
