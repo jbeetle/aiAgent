@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "cli": "node bin/cli.js",
+    "cli": "node --use-system-ca bin/cli.js",
+    "cli:verbose": "node --use-system-ca bin/cli.js --verbose",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
