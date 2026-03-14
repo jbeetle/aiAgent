@@ -11,7 +11,13 @@ export { SkillManager } from './skill.manager.js';
 // Schema 和验证
 export {
   skillSchema,
+  executableSkillSchema,
+  descriptiveSkillSchema,
+  SkillType,
   validateSkill,
+  detectSkillType,
+  convertToExecutableSkill,
+  getSkillSummary,
   createSkillTemplate
 } from './skill.schema.js';
 

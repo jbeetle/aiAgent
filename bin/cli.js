@@ -422,8 +422,29 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
         console.log(`\n${colors.bright}📋 已加载 Skills (${summaries.length}):${colors.reset}\n`);
 
         summaries.forEach((skill, index) => {
-            console.log(`${colors.cyan}${index + 1}.${colors.reset} ${colors.bright}${skill.name}${colors.reset} v${skill.version}`);
+            const typeBadge = skill.isDescriptive
+                ? `${colors.magenta}[描述性]${colors.reset}`
+                : `${colors.green}[可执行]${colors.reset}`;
+            const displayName = skill.originalName !== skill.name
+                ? `${skill.originalName} (${colors.dim}${skill.name}${colors.reset})`
+                : skill.name;
+
+            console.log(`${colors.cyan}${index + 1}.${colors.reset} ${colors.bright}${displayName}${colors.reset} v${skill.version} ${typeBadge}`);
             console.log(`   ${colors.dim}${skill.description}${colors.reset}`);
+
+            // 显示描述性技能的额外信息
+            if (skill.isDescriptive) {
+                if (skill.category) {
+                    console.log(`   ${colors.dim}分类: ${skill.category}${colors.reset}`);
+                }
+                if (skill.tags && skill.tags.length > 0) {
+                    console.log(`   ${colors.dim}标签: ${skill.tags.slice(0, 5).join(', ')}${colors.reset}`);
+                }
+                if (skill.capabilities && skill.capabilities.length > 0) {
+                    console.log(`   ${colors.dim}能力: ${skill.capabilities.slice(0, 3).join(', ')}${skill.capabilities.length > 3 ? '...' : ''}${colors.reset}`);
+                }
+            }
+
             console.log(`   ${colors.dim}来源: ${skill.source}${colors.reset}\n`);
         });
     }
