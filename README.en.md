@@ -23,6 +23,7 @@ A JavaScript-based AI agent framework implementing the ReAct (Reasoning + Acting
 - **MCP Client Integration**: Support for connecting and managing multiple MCP servers, enabling intelligent interaction between LLM and external tools
 - **Skill System**: Support for defining multi-step workflow skills via JSON/YAML, with dynamic loading and execution
 - **Code Execution Tool**: Support for dynamic execution of Node.js and Python code, allowing AI to program solutions for complex problems
+- **Interactive CLI**: Built-in command-line tool supporting natural language conversation and dynamic Skill management
 - **Comprehensive Logging**: Detailed development and debug logging
 
 ## 🏗️ Project Architecture
@@ -103,6 +104,27 @@ PROMPTS_LANG=cn  # or en, sets prompt language
 ```
 
 ## 🎯 Quick Start
+
+### 🖥️ CLI Interactive Tool (Recommended for Beginners)
+
+The framework provides an interactive command-line tool for conversing with the AI Agent without writing code:
+
+```bash
+# Start CLI
+npm run cli
+
+# Or use a specific model
+node bin/cli.js --vendor OpenAI --model gpt-4
+```
+
+In the CLI, you can:
+- Chat directly with AI using natural language
+- Use `/builtin` to load built-in skills (code review, data analysis, etc.)
+- Use `/load` to load custom skill files
+- Use `/list` to view loaded skills
+- Type `/help` to see all available commands
+
+**[View Full CLI Documentation →](docs/CLI.en.md)**
 
 ### MCP Client Usage (Latest Feature)
 
