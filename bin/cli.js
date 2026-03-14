@@ -648,7 +648,10 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
                         console.log();
                         break;
                     case 'error':
-                        log.error(chunk.error);
+                        console.log();
+                        log.error(`错误: ${chunk.error}`);
+                        console.log(`${colors.dim}提示: 使用 --verbose 查看详细错误信息${colors.reset}`);
+                        console.log();
                         break;
                     case 'max_iterations':
                         log.warning(chunk.message);
