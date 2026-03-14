@@ -55,76 +55,26 @@ export class ReActAgent {
      * @returns {Promise<Object>} - 代理的响应，包含最终答案
      */
     async run(query) {
-        try {
-            this.#log('开始执行 ReAct 代理...');
-            const messages = [
-                {role: 'system', content: this.#createSystemPrompt()},
-                {role: 'user', content: query}
-            ];
-            //this.log(messages);
-            let iterations = 0;
-            let finalAnswer = null;
-            while (iterations < this.config.maxIterations) {
-                this.#log(`迭代 ${iterations + 1}/${this.config.maxIterations}`);
-                const response = await this.openai.chat.completions.create({
-                    model: this.config.model,
-                    messages,
-                    tools: this.tools.map(t => ({type: 'function', function: t})),
-                    max_tokens: this.config.max_tokens
-                });
-                const message = response.choices[0].message;
-                const content = message.content;
-                const reasoningContent = message.reasoning_content;
-                // 对于 deepseek-reasoner，如果 content 为空，使用 reasoning_content
-                const contentToParse = content || reasoningContent || '';
-                this.#log('LLM 响应:', contentToParse);
-                const parsed = this.#parseResponse(contentToParse);
-                if (parsed.finalAnswer) {
-                    finalAnswer = parsed.finalAnswer;
-                    break;
-                }
-                if (parsed.action && parsed.actionInput) {
-                    const observation = await this.#executeTool(parsed.action, parsed.actionInput);
-                    // 构建 assistant 消息，支持 reasoning_content (deepseek-reasoner)
-                    // 如果 content 为空但 reasoningContent 有内容，使用 contentToParse 作为 content
-                    const messageContent = content || (reasoningContent ? contentToParse : '');
-                    const assistantMessage = {role: 'assistant', content: messageContent};
-                    if (reasoningContent) {
-                        assistantMessage.reasoning_content = reasoningContent;
-                    }
-                    messages.push(
-                        assistantMessage,
-                        {role: 'user', content: `观察结果: ${observation}`}
-                    );
-                } else {
-                    this.#log('未找到有效操作，继续...');
-                    const messageContent = content || (reasoningContent ? contentToParse : '');
-                    const assistantMessage = {role: 'assistant', content: messageContent};
-                    if (reasoningContent) {
-                        assistantMessage.reasoning_content = reasoningContent;
-                    }
-                    messages.push(assistantMessage);
-                }
-                iterations++;
-            }
-            if (!finalAnswer) {
-                finalAnswer = '抱歉，我无法在允许的迭代次数内找到完整答案。';
-            }
-            return {
-                success: true,
-                answer: finalAnswer,
-                iterations: iterations + 1,
-                history: messages
-            };
-        } catch (error) {
-            this.#log('代理执行错误:', error);
-            return {
-                success: false,
-                error: error.message,
-                answer: '处理您的请求时发生错误。',
-                history: this.conversationHistory
-            };
+        // 为了保持向后兼容，将历史对话作为上下文传递
+        const taskConfig = {
+            query,
+            contextMessages: this.conversationHistory,
+            tools: this.tools
+        };
+
+        const result = await this.executeTask(taskConfig, {
+            onStart: () => this.#log('开始执行 ReAct 代理...'),
+            onIterationStart: ({ iteration, maxIterations }) =>
+                this.#log(`迭代 ${iteration}/${maxIterations}`)
+        });
+
+        // 更新内部历史（向后兼容）
+        if (result.success) {
+            this.conversationHistory.push({ role: 'user', content: query });
+            this.conversationHistory.push({ role: 'assistant', content: result.answer });
         }
+
+        return result;
     }
 
     /**
@@ -400,30 +350,209 @@ export class ReActAgent {
      * @returns {Promise<Object>} - 包含最终答案的响应
      */
     async runStream(query, onChunk = null) {
-        try {
-            this.#log('开始执行流式 ReAct 代理...');
+        // 为了保持向后兼容，将历史对话作为上下文传递
+        const taskConfig = {
+            query,
+            contextMessages: this.conversationHistory,
+            tools: this.tools
+        };
 
-            const messages = [
-                {role: 'system', content: this.#createSystemPrompt()},
-                {role: 'user', content: query}
-            ];
+        const result = await this.executeTaskStream(taskConfig, onChunk);
+
+        // 更新内部历史（向后兼容）
+        if (result.success) {
+            this.conversationHistory.push({ role: 'user', content: query });
+            this.conversationHistory.push({ role: 'assistant', content: result.answer });
+        }
+
+        return result;
+    }
+
+    /**
+     * 执行任务（无状态，接受外部上下文）
+     * 这是改造后的核心任务执行方法，用于被 BaseLLMService 调用
+     *
+     * @param {Object} taskConfig - 任务配置
+     * @param {string} taskConfig.query - 用户查询
+     * @param {Array} taskConfig.contextMessages - 外部上下文消息（包含历史对话）
+     * @param {Array} taskConfig.tools - 本次任务可用的工具
+     * @param {Array} [taskConfig.suggestedTools] - 建议使用的工具
+     * @param {Object} [callbacks] - 回调函数
+     * @returns {Promise<Object>} - 执行结果
+     */
+    async executeTask(taskConfig, callbacks = {}) {
+        const { query, contextMessages = [], tools = this.tools, suggestedTools = [] } = taskConfig;
+
+        try {
+            this.#log('开始执行任务:', query);
+
+            // 构建消息数组：系统提示 + 上下文 + 当前查询
+            const messages = this.#buildMessagesWithContext(query, contextMessages, tools);
+
+            let iterations = 0;
+            let finalAnswer = null;
+
+            // 触发开始回调
+            if (callbacks.onStart) {
+                callbacks.onStart({ query, timestamp: new Date().toISOString() });
+            }
+
+            while (iterations < this.config.maxIterations) {
+                this.#log(`任务迭代 ${iterations + 1}/${this.config.maxIterations}`);
+
+                if (callbacks.onIterationStart) {
+                    callbacks.onIterationStart({ iteration: iterations + 1, maxIterations: this.config.maxIterations });
+                }
+
+                const response = await this.openai.chat.completions.create({
+                    model: this.config.model,
+                    messages,
+                    tools: tools.map(t => ({ type: 'function', function: t })),
+                    max_tokens: this.config.max_tokens
+                });
+
+                const message = response.choices[0].message;
+                const content = message.content;
+                const reasoningContent = message.reasoning_content;
+                const contentToParse = content || reasoningContent || '';
+
+                this.#log('LLM 响应:', contentToParse);
+
+                if (callbacks.onThinking) {
+                    callbacks.onThinking({ content: contentToParse, reasoning: reasoningContent });
+                }
+
+                const parsed = this.#parseResponse(contentToParse);
+
+                if (parsed.finalAnswer) {
+                    finalAnswer = parsed.finalAnswer;
+
+                    if (callbacks.onFinalAnswer) {
+                        callbacks.onFinalAnswer({ answer: finalAnswer });
+                    }
+                    break;
+                }
+
+                if (parsed.action && parsed.actionInput) {
+                    if (callbacks.onToolStart) {
+                        callbacks.onToolStart({
+                            tool: parsed.action,
+                            input: parsed.actionInput
+                        });
+                    }
+
+                    const observation = await this.#executeTool(parsed.action, parsed.actionInput);
+
+                    if (callbacks.onToolResult) {
+                        callbacks.onToolResult({
+                            tool: parsed.action,
+                            result: observation
+                        });
+                    }
+
+                    // 构建 assistant 消息
+                    const messageContent = content || (reasoningContent ? contentToParse : '');
+                    const assistantMessage = { role: 'assistant', content: messageContent };
+                    if (reasoningContent) {
+                        assistantMessage.reasoning_content = reasoningContent;
+                    }
+                    messages.push(
+                        assistantMessage,
+                        { role: 'user', content: `观察结果: ${observation}` }
+                    );
+                } else {
+                    // 没有动作但有内容，视为最终答案
+                    if (contentToParse.trim()) {
+                        finalAnswer = contentToParse.trim();
+
+                        if (callbacks.onFinalAnswer) {
+                            callbacks.onFinalAnswer({ answer: finalAnswer });
+                        }
+                        break;
+                    }
+
+                    const messageContent = content || (reasoningContent ? contentToParse : '');
+                    const assistantMessage = { role: 'assistant', content: messageContent };
+                    if (reasoningContent) {
+                        assistantMessage.reasoning_content = reasoningContent;
+                    }
+                    messages.push(assistantMessage);
+                }
+
+                iterations++;
+            }
+
+            if (!finalAnswer) {
+                finalAnswer = '抱歉，我无法在允许的迭代次数内找到完整答案。';
+
+                if (callbacks.onMaxIterations) {
+                    callbacks.onMaxIterations({ maxIterations: this.config.maxIterations });
+                }
+            }
+
+            const result = {
+                success: true,
+                answer: finalAnswer,
+                iterations: iterations + 1,
+                history: messages
+            };
+
+            if (callbacks.onComplete) {
+                callbacks.onComplete({ result });
+            }
+
+            return result;
+
+        } catch (error) {
+            this.#log('任务执行错误:', error);
+
+            const errorResult = {
+                success: false,
+                error: error.message,
+                answer: '处理任务时发生错误。'
+            };
+
+            if (callbacks.onError) {
+                callbacks.onError({ error: error.message, stack: error.stack });
+            }
+
+            return errorResult;
+        }
+    }
+
+    /**
+     * 流式执行任务
+     *
+     * @param {Object} taskConfig - 任务配置（同 executeTask）
+     * @param {Function} onChunk - 流式回调函数
+     * @returns {Promise<Object>} - 执行结果
+     */
+    async executeTaskStream(taskConfig, onChunk = null) {
+        const { query, contextMessages = [], tools = this.tools, suggestedTools = [] } = taskConfig;
+
+        try {
+            this.#log('开始流式执行任务:', query);
+
+            // 构建消息数组
+            const messages = this.#buildMessagesWithContext(query, contextMessages, tools);
 
             let iterations = 0;
             let finalAnswer = null;
             let accumulatedResponse = '';
+            let accumulatedReasoning = '';
 
             // 发送开始事件
             if (onChunk) {
                 onChunk({
                     type: 'start',
-                    message: '开始处理问题...',
+                    message: '开始处理任务...',
                     iteration: 0,
                     timestamp: new Date().toISOString()
                 });
             }
 
             while (iterations < this.config.maxIterations) {
-                this.#log(`迭代 ${iterations + 1}/${this.config.maxIterations}`);
+                this.#log(`流式任务迭代 ${iterations + 1}/${this.config.maxIterations}`);
 
                 if (onChunk) {
                     onChunk({
@@ -439,16 +568,13 @@ export class ReActAgent {
                 const stream = await this.openai.chat.completions.create({
                     model: this.config.model,
                     messages,
-                    tools: this.tools.map(t => ({type: 'function', function: t})),
+                    tools: tools.map(t => ({ type: 'function', function: t })),
                     max_tokens: this.config.max_tokens,
                     stream: true
                 });
 
-                // 收集完整的响应
                 accumulatedResponse = '';
-
-                // 用于收集 reasoning_content (deepseek-reasoner)
-                let accumulatedReasoning = '';
+                accumulatedReasoning = '';
 
                 for await (const chunk of stream) {
                     const delta = chunk.choices[0]?.delta;
@@ -462,7 +588,6 @@ export class ReActAgent {
                         accumulatedReasoning += reasoning;
                     }
 
-                    // 实时发送思考过程
                     if (onChunk && (content || reasoning)) {
                         onChunk({
                             type: 'thinking',
@@ -478,11 +603,9 @@ export class ReActAgent {
 
                 this.#log('LLM 流式响应完成:', accumulatedResponse);
 
-                // 对于 deepseek-reasoner，如果 content 为空，使用 reasoning_content
                 const contentToParse = accumulatedResponse || accumulatedReasoning || '';
                 const parsed = this.#parseResponse(contentToParse);
-                //console.log('解析结果--->:', parsed);
-                // 发送解析结果
+
                 if (onChunk) {
                     onChunk({
                         type: 'parsed',
@@ -534,21 +657,35 @@ export class ReActAgent {
                         });
                     }
 
-                    // 构建 assistant 消息，支持 reasoning_content (deepseek-reasoner)
-                    // 如果 accumulatedResponse 为空但 accumulatedReasoning 有内容，使用 contentToParse
                     const messageContent = accumulatedResponse || (accumulatedReasoning ? contentToParse : '');
-                    const assistantMessage = {role: 'assistant', content: messageContent};
+                    const assistantMessage = { role: 'assistant', content: messageContent };
                     if (accumulatedReasoning) {
                         assistantMessage.reasoning_content = accumulatedReasoning;
                     }
                     messages.push(
                         assistantMessage,
-                        {role: 'user', content: `观察结果: ${observation}`}
+                        { role: 'user', content: `观察结果: ${observation}` }
                     );
                 } else {
+                    // 没有动作但有内容，视为最终答案
+                    if (contentToParse.trim()) {
+                        finalAnswer = contentToParse.trim();
+
+                        if (onChunk) {
+                            onChunk({
+                                type: 'final_answer',
+                                message: finalAnswer,
+                                iteration: iterations + 1,
+                                timestamp: new Date().toISOString()
+                            });
+                        }
+                        break;
+                    }
+
                     this.#log('未找到有效操作，继续...');
+
                     const messageContent = accumulatedResponse || (accumulatedReasoning ? contentToParse : '');
-                    const assistantMessage = {role: 'assistant', content: messageContent};
+                    const assistantMessage = { role: 'assistant', content: messageContent };
                     if (accumulatedReasoning) {
                         assistantMessage.reasoning_content = accumulatedReasoning;
                     }
@@ -569,6 +706,7 @@ export class ReActAgent {
 
             if (!finalAnswer) {
                 finalAnswer = '抱歉，我无法在允许的迭代次数内找到完整答案。';
+
                 if (onChunk) {
                     onChunk({
                         type: 'max_iterations',
@@ -598,12 +736,12 @@ export class ReActAgent {
             return result;
 
         } catch (error) {
-            this.#log('流式代理执行错误:', error);
+            this.#log('流式任务执行错误:', error);
+
             const errorResult = {
                 success: false,
                 error: error.message,
-                answer: '处理您的请求时发生错误。',
-                history: this.conversationHistory
+                answer: '处理任务时发生错误。'
             };
 
             if (onChunk) {
@@ -617,5 +755,46 @@ export class ReActAgent {
 
             return errorResult;
         }
+    }
+
+    /**
+     * 构建带上下文的消息数组
+     * @private
+     */
+    #buildMessagesWithContext(query, contextMessages, tools) {
+        const messages = [];
+
+        // 添加系统提示
+        messages.push({
+            role: 'system',
+            content: this.#createSystemPromptWithTools(tools)
+        });
+
+        // 添加上下文（排除系统消息，因为已添加）
+        if (contextMessages && contextMessages.length > 0) {
+            for (const msg of contextMessages) {
+                if (msg.role !== 'system') {
+                    messages.push({
+                        role: msg.role,
+                        content: msg.content,
+                        ...(msg.reasoning_content && { reasoning_content: msg.reasoning_content })
+                    });
+                }
+            }
+        }
+
+        // 添加当前查询
+        messages.push({ role: 'user', content: query });
+
+        return messages;
+    }
+
+    /**
+     * 创建带工具描述的系统提示
+     * @private
+     */
+    #createSystemPromptWithTools(tools) {
+        const skills = this.skillEngine.getAllSkills();
+        return promptFactory.createReActPrompt(tools, promptFactory.getCurrentLanguage(), skills);
     }
 }
