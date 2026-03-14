@@ -34,7 +34,7 @@ import {
 import LLMClient from "./agents/models/llm.client.js";
 import {SessionChat} from './agents/models/chat.session.js';
 import McpClient from './agents/models/mcp.client.js';
-import {BaseLLMService} from './agents/conversation/base.llm.service.js';
+import {BaseLLMService, IntentRecognizer} from './agents/conversation/index.js';
 
 // 导入技能系统相关模块
 import {createSkillTemplate, SkillEngine, SkillManager, skillSchema, validateSkill} from './skills/index.js';
@@ -57,6 +57,7 @@ export const Models = {
     SessionChat,// 会话聊天类，用于管理上下文和历史消息
     McpClient,// MCP客户端，用于与MCP服务器进行交互
     BaseLLMService, // 基础LLM对话服务，管理跨对话上下文和智能路由
+    IntentRecognizer, // 意图识别器，支持基于工具描述的智能意图识别
     registerVendor, // 动态注册新的模型提供商
     getRegisteredVendors, // 获取所有已注册的模型提供商列表
     getVendorModels, // 获取特定提供商支持的模型列表

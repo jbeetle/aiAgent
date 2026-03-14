@@ -1,6 +1,7 @@
 import {SessionChat} from '../models/chat.session.js';
 import {createLogger, serializeResult} from '../utils/logger.js';
 import {promptFactory} from '../utils/prompt.factory.js';
+import {IntentRecognizer} from '../utils/intent.recognizer.js';
 
 /**
  * BaseLLMService - 基础 LLM 对话服务层
@@ -20,6 +21,8 @@ export class BaseLLMService {
     #tools = [];
     #skills = [];
 
+    #intentRecognizer = null;
+
     /**
      * 创建 BaseLLMService 实例
      * @param {Object} llmClient - LLM 客户端实例 (如 LLMClient)
@@ -30,6 +33,11 @@ export class BaseLLMService {
      * @param {boolean} [config.verbose=false] - 启用详细日志
      * @param {boolean} [config.useIntentRecognition=true] - 是否使用意图识别
      * @param {string} [config.language] - 语言 ('cn' | 'en')
+     * @param {Object} [config.intentRecognition] - 意图识别配置
+     * @param {string} [config.intentRecognition.mode='balanced'] - 识别模式: 'aggressive' | 'conservative' | 'balanced'
+     * @param {boolean} [config.intentRecognition.useToolDescriptions=true] - 是否使用工具描述
+     * @param {boolean} [config.intentRecognition.useSkillDescriptions=true] - 是否使用 Skill 描述
+     * @param {string} [config.intentRecognition.llmConfirmationThreshold='medium'] - LLM 确认阈值: 'low' | 'medium' | 'high'
      */
     constructor(llmClient, config = {}) {
         this.config = {
@@ -40,6 +48,16 @@ export class BaseLLMService {
             systemPrompt: null,
             useIntentRecognition: true,
             language: process.env.PROMPTS_LANG || 'cn',
+            intentRecognition: {
+                mode: 'balanced',
+                useToolDescriptions: true,
+                useSkillDescriptions: true,
+                llmConfirmationThreshold: 'medium',
+                enableSemanticMatching: true,
+                minToolRelevanceScore: 0.3,
+                maxToolsInPrompt: 10,
+                ...config.intentRecognition
+            },
             ...config
         };
 
@@ -55,6 +73,16 @@ export class BaseLLMService {
             compressThreshold: this.config.compressThreshold,
             verbose: this.config.verbose
         });
+
+        // 创建 IntentRecognizer
+        if (this.config.useIntentRecognition) {
+            this.#intentRecognizer = new IntentRecognizer(
+                llmClient,
+                llmClient.model,
+                this.config.intentRecognition,
+                this.config.verbose
+            );
+        }
 
         this.#log('BaseLLMService 初始化完成');
     }
@@ -75,6 +103,11 @@ export class BaseLLMService {
     registerTools(tools) {
         this.#tools = tools || [];
         this.#log(`已注册 ${this.#tools.length} 个工具`);
+
+        // 同时注册到 IntentRecognizer
+        if (this.#intentRecognizer) {
+            this.#intentRecognizer.registerTools(tools);
+        }
     }
 
     /**
@@ -84,6 +117,11 @@ export class BaseLLMService {
     registerSkills(skills) {
         this.#skills = skills || [];
         this.#log(`已注册 ${this.#skills.length} 个技能`);
+
+        // 同时注册到 IntentRecognizer
+        if (this.#intentRecognizer) {
+            this.#intentRecognizer.registerSkills(skills);
+        }
     }
 
     /**
@@ -163,194 +201,17 @@ export class BaseLLMService {
     }
 
     /**
-     * 意图识别（关键词 + LLM 混合策略）
+     * 意图识别（使用 IntentRecognizer）
      * @private
      */
     async #analyzeIntent(input) {
-        // 1. 关键词快速匹配（高置信度场景）
-        const keywordResult = this.#checkKeywords(input);
-        if (keywordResult.confidence === 'high') {
-            return keywordResult;
-        }
-
-        // 2. 如果没有启用意图识别或没有工具，直接返回不需要工具
-        if (!this.config.useIntentRecognition || this.#tools.length === 0) {
+        // 如果没有启用意图识别或没有工具，直接返回不需要工具
+        if (!this.config.useIntentRecognition || !this.#intentRecognizer || this.#tools.length === 0) {
             return { needsTools: false, confidence: 'high', reason: 'no_tools_available' };
         }
 
-        // 3. LLM 确认（模糊输入时使用）
-        return await this.#llmIntentCheck(input);
-    }
-
-    /**
-     * 关键词检查
-     * @private
-     */
-    #checkKeywords(input) {
-        const lowerInput = input.toLowerCase();
-
-        // 明确的工具调用关键词
-        const toolKeywords = [
-            '计算', 'calculate', '算一下', '等于几', '多少',
-            '执行', 'execute', '运行', 'run',
-            '查询', 'query', '搜索', 'search',
-            '获取', 'get', 'fetch', '读取', 'read',
-            '写入', 'write', '保存', 'save',
-            '生成', 'generate', '创建', 'create',
-            '分析', 'analyze', '统计', 'statistics'
-        ];
-
-        // 明确的聊天关键词（排除工具调用）
-        const chatKeywords = [
-            '你好', 'hello', 'hi', 'hey',
-            '谢谢', 'thanks', 'thank you', '谢了',
-            '再见', 'bye', 'goodbye',
-            '名字', 'name', '叫什么',
-            '帮助', 'help', '怎么用',
-            '天气', 'weather',
-            '时间', 'time', '日期', 'date'
-        ];
-
-        // 检查是否匹配工具关键词
-        for (const keyword of toolKeywords) {
-            if (lowerInput.includes(keyword.toLowerCase())) {
-                // 进一步检查是否包含数字、表达式等
-                const hasMathExpr = /[\d+\-*/().]+/.test(input);
-                const hasCode = /(function|class|const|let|var|if|for|while)/.test(input);
-
-                if (hasMathExpr || hasCode || lowerInput.includes('计算') || lowerInput.includes('calculate')) {
-                    return {
-                        needsTools: true,
-                        confidence: 'high',
-                        reason: 'math_expression',
-                        suggestedTools: ['calculator', 'advanced_calculator']
-                    };
-                }
-
-                return {
-                    needsTools: true,
-                    confidence: 'medium',
-                    reason: 'tool_keyword_match',
-                    keyword: keyword
-                };
-            }
-        }
-
-        // 检查是否匹配纯聊天关键词
-        for (const keyword of chatKeywords) {
-            if (lowerInput.includes(keyword.toLowerCase())) {
-                return {
-                    needsTools: false,
-                    confidence: 'high',
-                    reason: 'chat_keyword_match',
-                    keyword: keyword
-                };
-            }
-        }
-
-        // 默认返回低置信度，需要 LLM 确认
-        return {
-            needsTools: false,
-            confidence: 'low',
-            reason: 'unclear_input'
-        };
-    }
-
-    /**
-     * LLM 意图确认
-     * @private
-     */
-    async #llmIntentCheck(input) {
-        try {
-            const toolNames = this.#tools.map(t => t.name).join(', ');
-            const prompt = this.#createIntentPrompt(input, toolNames);
-
-            const response = await this.llmClient.getRawClient().chat.completions.create({
-                model: this.model,
-                messages: [
-                    { role: 'system', content: 'You are an intent classification assistant. Respond with JSON only.' },
-                    { role: 'user', content: prompt }
-                ],
-                max_tokens: 150,
-                temperature: 0.1
-            });
-
-            const content = response.choices[0].message.content.trim();
-
-            // 尝试解析 JSON 响应
-            try {
-                const jsonMatch = content.match(/\{[\s\S]*\}/);
-                const result = JSON.parse(jsonMatch ? jsonMatch[0] : content);
-
-                return {
-                    needsTools: result.needs_tools === true,
-                    confidence: result.confidence || 'medium',
-                    reason: result.reason || 'llm_classification',
-                    suggestedTools: result.suggested_tools || []
-                };
-            } catch (e) {
-                // JSON 解析失败，回退到简单判断
-                const needsTools = content.toLowerCase().includes('true') ||
-                    content.toLowerCase().includes('yes') ||
-                    content.toLowerCase().includes('tool');
-
-                return {
-                    needsTools,
-                    confidence: 'low',
-                    reason: 'fallback_parsing'
-                };
-            }
-        } catch (error) {
-            this.#log('LLM 意图识别失败:', error);
-            // 失败时默认不使用工具，避免不必要的调用
-            return { needsTools: false, confidence: 'low', reason: 'llm_error' };
-        }
-    }
-
-    /**
-     * 创建意图识别提示词
-     * @private
-     */
-    #createIntentPrompt(input, toolNames) {
-        const isCN = this.config.language === 'cn';
-
-        if (isCN) {
-            return `请分析以下用户输入，判断是否需要使用工具来回答。
-
-可用工具: ${toolNames}
-
-用户输入: "${input}"
-
-请判断：
-1. 用户是在进行日常对话（问候、闲聊、询问个人信息等）
-2. 用户需要执行具体任务（计算、查询、数据处理等）
-
-请以 JSON 格式回复：
-{
-  "needs_tools": true/false,
-  "confidence": "high/medium/low",
-  "reason": "判断理由",
-  "suggested_tools": ["可能需要的工具名称"]
-}`;
-        } else {
-            return `Please analyze the following user input and determine if tools are needed to respond.
-
-Available tools: ${toolNames}
-
-User input: "${input}"
-
-Determine:
-1. Is the user having a casual conversation (greetings, chat, asking personal info)?
-2. Does the user need to perform a specific task (calculation, query, data processing)?
-
-Please respond in JSON format:
-{
-  "needs_tools": true/false,
-  "confidence": "high/medium/low",
-  "reason": "reason for judgment",
-  "suggested_tools": ["suggested tool names"]
-}`;
-        }
+        // 使用 IntentRecognizer 进行意图识别
+        return await this.#intentRecognizer.recognize(input);
     }
 
     /**
@@ -550,6 +411,42 @@ Please be friendly, professional, and provide accurate and useful information.`;
      */
     getTokenStatus() {
         return this.sessionChat.getTokenStatus();
+    }
+
+    /**
+     * 获取意图识别配置
+     * @returns {Object} - 意图识别配置
+     */
+    getIntentRecognitionConfig() {
+        return this.#intentRecognizer ? this.#intentRecognizer.getConfig() : null;
+    }
+
+    /**
+     * 更新意图识别配置
+     * @param {Object} config - 新的配置选项
+     * @param {string} [config.mode] - 识别模式: 'aggressive' | 'conservative' | 'balanced'
+     * @param {boolean} [config.useToolDescriptions] - 是否使用工具描述
+     * @param {boolean} [config.useSkillDescriptions] - 是否使用 Skill 描述
+     * @param {string} [config.llmConfirmationThreshold] - LLM 确认阈值: 'low' | 'medium' | 'high'
+     * @param {boolean} [config.enableSemanticMatching] - 是否启用语义匹配
+     * @param {number} [config.minToolRelevanceScore] - 最小工具相关度分数
+     * @param {number} [config.maxToolsInPrompt] - 提示词中包含的最大工具数量
+     */
+    updateIntentRecognitionConfig(config) {
+        if (this.#intentRecognizer) {
+            this.#intentRecognizer.updateConfig(config);
+            this.#log('意图识别配置已更新:', config);
+        } else {
+            this.#log('警告: IntentRecognizer 未初始化，无法更新配置');
+        }
+    }
+
+    /**
+     * 设置意图识别模式
+     * @param {string} mode - 'aggressive' | 'conservative' | 'balanced'
+     */
+    setIntentRecognitionMode(mode) {
+        this.updateIntentRecognitionConfig({ mode });
     }
 }
 
