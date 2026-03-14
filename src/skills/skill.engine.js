@@ -85,6 +85,47 @@ export class SkillEngine {
   }
 
   /**
+   * 获取技能的能力描述
+   * 用于意图识别器了解技能能力
+   *
+   * @param {string} skillName - 技能名称（可选，不提供则返回所有技能的能力）
+   * @returns {Object|Array} - 技能能力描述
+   */
+  getSkillCapabilities(skillName = null) {
+    if (skillName) {
+      const skill = this.skills.get(skillName);
+      if (!skill) return null;
+
+      return {
+        name: skill.name,
+        originalName: skill._originalName || skill.name,
+        type: skill._skillType || 'executable',
+        description: skill.description,
+        category: skill.category,
+        tags: skill.tags || [],
+        capabilities: skill.capabilities || [],
+        input: skill.input || [],
+        output: skill.output || [],
+        mcp: skill.mcp || null
+      };
+    }
+
+    // 返回所有技能的能力列表
+    return Array.from(this.skills.values()).map(skill => ({
+      name: skill.name,
+      originalName: skill._originalName || skill.name,
+      type: skill._skillType || 'executable',
+      description: skill.description,
+      category: skill.category,
+      tags: skill.tags || [],
+      capabilities: skill.capabilities || [],
+      input: skill.input || [],
+      output: skill.output || [],
+      mcp: skill.mcp || null
+    }));
+  }
+
+  /**
    * 执行技能
    * @param {string} skillName - 技能名称
    * @param {Object} parameters - 执行参数
