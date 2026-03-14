@@ -25,6 +25,12 @@ npm start
 # Run in watch mode (Node.js --watch)
 npm run dev
 
+# Run the interactive CLI
+npm run cli
+
+# Run CLI with specific model
+node bin/cli.js --vendor OpenAI --model gpt-4
+
 # Run example files
 node examples/basic-usage.js
 node examples/streaming-usage.js
@@ -94,6 +100,57 @@ The framework exports three main namespaces from `src/index.js`:
 }
 ```
 
+### 4. `Skills` Namespace (`src/skills/`)
+
+**Skill System** provides high-level workflow composition through JSON/YAML definitions:
+
+**SkillEngine** (`skill.engine.js`): Executes multi-step workflows.
+- Step types: `tool`, `llm`, `skill` (nested), `condition`
+- Variable substitution: `{{parameters.xxx}}`, `{{steps.xxx.output}}`, `{{env.xxx}}`
+- Execution depth limit (default: 10) prevents infinite recursion
+- Methods: `registerSkill()`, `execute()`, `unregisterSkill()`
+
+**SkillManager** (`skill.manager.js`): Loads skills from files/directories.
+- `loadFromFile()` - Load single skill (JSON/YAML/JS)
+- `loadFromDirectory()` - Batch load from directory
+- `loadBuiltinSkills()` - Load from `src/skills/builtin/`
+- `unloadSkill()` - Remove loaded skill
+- `reloadSkill()` - Reload from original file path
+
+**Skill Schema** (`skill.schema.js`): JSON Schema validation and template generation.
+
+**Built-in Skills** (`src/skills/builtin/`):
+- `code_review` - Automated code review with quality checks
+- `data_analysis` - CSV/JSON data analysis and reporting
+- `doc_generate` - Documentation generation from code
+- `system_info` - System information collection
+
+### 5. CLI Tool (`bin/cli.js`)
+
+Interactive command-line interface for the framework.
+
+**CLI Commands:**
+- `/load <filepath>` - Load skill from file
+- `/loaddir <dirpath>` - Load skills from directory
+- `/unload <skillname>` - Unload skill
+- `/reload <skillname>` - Reload skill
+- `/list` - List loaded skills
+- `/builtin` - Load built-in skills
+- `/clear` - Clear conversation history
+- `/history` - Show conversation history
+- `/model <vendor> <model>` - Switch LLM model
+- `/help` - Show help
+- `/exit` - Exit CLI
+
+**CLI Options:**
+```bash
+node bin/cli.js [options]
+  -v, --vendor <name>      LLM provider (default: DeepSeek)
+  -m, --model <name>       Model name (default: deepseek-chat)
+  -s, --skills-dir <path>  Load skills directory at startup
+  --verbose                Enable verbose logging
+```
+
 ## ReAct Pattern Implementation
 
 The ReAct pattern is implemented in `ReActAgent.run()`:
@@ -109,6 +166,20 @@ The ReAct pattern is implemented in `ReActAgent.run()`:
    - `Action:` prefix for tool name
    - `Action Input:` prefix for arguments (JSON or string)
    - `Final Answer:` prefix for completion
+
+## Skill Execution Flow
+
+Skills are executed by the SkillEngine through the ReActAgent:
+
+1. **Registration**: Skills loaded via `SkillManager.loadFromFile()` are registered to `SkillEngine`
+2. **Invocation**: ReActAgent recognizes `Skill` action type and calls `#executeSkill()`
+3. **Workflow Execution**: SkillEngine executes steps sequentially:
+   - `tool` steps: Call tools from the tools registry
+   - `llm` steps: Generate text using LLM client
+   - `skill` steps: Recursively execute nested skills
+   - `condition` steps: Branch based on evaluated conditions
+4. **Variable Resolution**: Template strings are resolved using execution context
+5. **Result Return**: Final outputs are returned to the agent
 
 ## Environment Configuration
 
@@ -149,3 +220,9 @@ VOLC_BASE_URL=...      # Custom base URL for Volcano
 2. LLM decides if MCP tool is needed (format: `NEED_MCP: server.tool\n参数: {...}`)
 3. If needed, McpClient calls the tool and optionally has LLM summarize results
 4. Returns OpenAI-compatible response format
+
+**Skill Variable Resolution:**
+- `{{parameters.name}}` - Input parameter substitution
+- `{{steps.stepId.output}}` - Previous step output reference
+- `{{outputs.key}}` - Saved output values
+- `{{env.VAR_NAME}}` - Environment variable access
