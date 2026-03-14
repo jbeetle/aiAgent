@@ -42,7 +42,72 @@ Skill（技能）层次结构
 
 ## Skill 定义格式
 
-### 示例：数据分析技能
+Skill 支持以下文件格式：
+- **JSON**: `.skill.json`
+- **YAML**: `.skill.yaml`, `.skill.yml`
+- **JavaScript**: `.skill.js`
+- **Markdown**: `.skill.md` (推荐，支持 YAML frontmatter)
+
+### Markdown 格式（推荐）
+
+Markdown 格式的 Skill 文件使用 YAML frontmatter 定义技能元数据：
+
+```markdown
+---
+name: data_analysis
+version: "1.0.0"
+description: 分析数据文件并生成报告
+parameters:
+  type: object
+  properties:
+    file_path:
+      type: string
+      description: 数据文件路径
+    analysis_type:
+      type: string
+      enum: ["summary", "trend", "correlation"]
+      description: 分析类型
+  required: ["file_path"]
+workflow:
+  steps:
+    - id: read_file
+      type: tool
+      tool: file_reader
+      input:
+        path: "{{parameters.file_path}}"
+    - id: analyze
+      type: llm
+      prompt: "分析以下数据，生成{{parameters.analysis_type}}报告:\n{{steps.read_file.output}}"
+      output_key: report
+    - id: save
+      type: tool
+      tool: file_writer
+      input:
+        path: "{{parameters.file_path}}.report.md"
+        content: "{{steps.analyze.output}}"
+knowledge:
+  examples:
+    - input:
+        file_path: "./sales.csv"
+        analysis_type: "trend"
+      description: 分析销售数据的趋势
+  best_practices:
+    - "确保数据文件存在且格式正确"
+    - "根据数据类型选择合适的分析方法"
+---
+
+# 数据分析技能
+
+这是数据分析技能的详细说明文档...
+```
+
+**Markdown 格式的优势：**
+1. **可读性强** - 可以同时作为文档阅读
+2. **支持注释** - YAML 格式支持注释
+3. **多格式支持** - 支持 JSON 和 YAML 两种 frontmatter 格式
+4. **文档和配置一体** - 技能定义和说明文档在同一个文件中
+
+### JSON 格式
 
 ```json
 {
