@@ -37,7 +37,7 @@
       {
         "id": "analyze_data",
         "type": "llm",
-        "prompt": "请对以下数据进行{{parameters.analysis_type}}分析，生成详细报告：\n\n{{steps.read_file.output}}\n\n要求：\n1. 提供数据概览和关键指标\n2. 根据分析类型提供深入洞察\n3. 使用清晰的格式组织内容\n4. 如有异常值或重要发现请特别标注",
+        "prompt": "请对以下数据进行{{parameters.analysis_type}}分析，生成详细报告：\n\n{{steps.read_file.output.content}}\n\n要求：\n1. 提供数据概览和关键指标\n2. 根据分析类型提供深入洞察\n3. 使用清晰的格式组织内容\n4. 如有异常值或重要发现请特别标注",
         "output_key": "analysis_report"
       },
       {
