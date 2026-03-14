@@ -6,6 +6,7 @@
  */
 
 import {Agent, Models, Tools} from '../src/index.js';
+import {BaseLLMService} from '../src/agents/conversation/index.js';
 import readline from 'node:readline/promises';
 import {stdin as input, stdout as output} from 'node:process';
 import path from 'path';
@@ -107,15 +108,16 @@ function printHelp() {
 
 /**
  * CLI Agent 类
+ * 新架构：BaseLLMService 作为主要对话接口，ReActAgent 作为任务执行器
  */
 class CLIAgent {
     constructor(options) {
         this.options = options;
         this.tools = Tools.getBuiltInTools();
-        this.agent = null;
+        this.reactAgent = null;
+        this.baseLLMService = null;
         this.rl = null;
         this.running = false;
-        this.conversationHistory = [];
     }
 
     /**
@@ -123,8 +125,11 @@ class CLIAgent {
      */
     async initialize() {
         try {
-            // 创建 ReActAgent
-            this.agent = new Agent.ReActAgent(
+            // 创建 LLM 客户端
+            const llmClient = Models.createModel(this.options.vendor, this.options.model);
+
+            // 创建 ReActAgent（仅作为任务执行器）
+            this.reactAgent = new Agent.ReActAgent(
                 this.options.vendor,
                 this.options.model,
                 this.tools,
@@ -133,6 +138,19 @@ class CLIAgent {
                     maxIterations: 10
                 }
             );
+
+            // 创建 BaseLLMService（主要对话接口，管理跨对话上下文）
+            this.baseLLMService = new BaseLLMService(llmClient, {
+                verbose: this.options.verbose,
+                maxMessages: 20,
+                tokenLimit: 1024 * 64,
+                useIntentRecognition: true,
+                language: process.env.PROMPTS_LANG || 'cn'
+            });
+
+            // 关联两者：BaseLLMService 使用 ReActAgent 执行工具任务
+            this.baseLLMService.setReActAgent(this.reactAgent);
+            this.baseLLMService.registerTools(this.tools);
 
             // 创建 readline 接口
             this.rl = readline.createInterface({
@@ -146,10 +164,20 @@ class CLIAgent {
                 await this.loadSkillsFromDirectory(this.options.skillsDir);
             }
 
+            this.#log('CLI 初始化完成，使用新架构：BaseLLMService + ReActAgent');
             return true;
         } catch (error) {
             log.error(`初始化失败: ${error.message}`);
             return false;
+        }
+    }
+
+    /**
+     * 私有日志方法
+     */
+    #log(...args) {
+        if (this.options.verbose) {
+            console.log(`${colors.dim}[CLI]${colors.reset}`, ...args);
         }
     }
 
@@ -252,13 +280,16 @@ class CLIAgent {
      * 打印启动横幅
      */
     printBanner() {
-        const skillCount = this.agent.getSkillSummaries().length;
+        const skillCount = this.reactAgent.getSkillSummaries().length;
+        const stats = this.baseLLMService.getStats();
+        const contextCount = Math.max(0, (stats.messageCount || 1) - 1);
         console.log(`
 ${colors.bright}${colors.cyan}🤖 ReAct Agent CLI${colors.reset}
 ${colors.dim}==================${colors.reset}
 ${colors.blue}Provider:${colors.reset} ${this.options.vendor}
 ${colors.blue}Model:${colors.reset}    ${this.options.model}
 ${colors.blue}Skills:${colors.reset}   ${skillCount} loaded
+${colors.dim}Context:${colors.reset}  ${contextCount} messages
 
 ${colors.dim}Type /help for commands or start chatting!${colors.reset}
 `);
@@ -304,7 +335,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
         try {
             // 支持相对路径
             const resolvedPath = path.resolve(filePath);
-            const skill = await this.agent.loadSkill(resolvedPath);
+            const skill = await this.reactAgent.loadSkill(resolvedPath);
             log.success(`Skill "${skill.name}" v${skill.version} 加载成功`);
             log.info(`描述: ${skill.description}`);
         } catch (error) {
@@ -323,7 +354,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
 
         try {
             const resolvedPath = path.resolve(dirPath);
-            const skills = await this.agent.loadSkillsFromDirectory(resolvedPath);
+            const skills = await this.reactAgent.loadSkillsFromDirectory(resolvedPath);
             log.success(`成功加载 ${skills.length} 个 skills:`);
             skills.forEach(skill => {
                 console.log(`  ${colors.cyan}•${colors.reset} ${skill.name} v${skill.version}: ${skill.description}`);
@@ -343,7 +374,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
         }
 
         try {
-            const info = this.agent.unloadSkill(skillName);
+            const info = this.reactAgent.unloadSkill(skillName);
             log.success(`Skill "${skillName}" 已卸载`);
             log.info(`来源: ${info.filePath}`);
         } catch (error) {
@@ -361,7 +392,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
         }
 
         try {
-            const skill = await this.agent.reloadSkill(skillName);
+            const skill = await this.reactAgent.reloadSkill(skillName);
             log.success(`Skill "${skillName}" 重新加载成功`);
             log.info(`版本: v${skill.version}`);
         } catch (error) {
@@ -373,7 +404,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
      * 列出所有已加载的 Skills
      */
     listSkills() {
-        const summaries = this.agent.getSkillSummaries();
+        const summaries = this.reactAgent.getSkillSummaries();
 
         if (summaries.length === 0) {
             log.warning('没有已加载的 skills');
@@ -395,7 +426,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
      */
     async loadBuiltinSkills() {
         try {
-            const skills = await this.agent.skillManager.loadBuiltinSkills();
+            const skills = await this.reactAgent.skillManager.loadBuiltinSkills();
             if (skills.length === 0) {
                 log.warning('没有内置 skills 或目录不存在');
             } else {
@@ -413,8 +444,8 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
      * 清除对话历史
      */
     clearHistory() {
-        this.agent.reset();
-        this.conversationHistory = [];
+        this.reactAgent.reset();
+        this.baseLLMService.clearHistory();
         log.success('对话历史已清除');
     }
 
@@ -422,19 +453,28 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
      * 显示对话历史
      */
     showHistory() {
-        if (this.conversationHistory.length === 0) {
+        const history = this.baseLLMService.getHistory();
+        if (history.length <= 1) { // 只有系统消息
             log.warning('对话历史为空');
             return;
         }
 
-        console.log(`\n${colors.bright}对话历史:${colors.reset}\n`);
-        this.conversationHistory.forEach((entry, index) => {
+        const stats = this.baseLLMService.getStats();
+        const tokenStatus = this.baseLLMService.getTokenStatus();
+
+        console.log(`\n${colors.bright}对话历史:${colors.reset}`);
+        console.log(`${colors.dim}消息数: ${stats.messagesCount - 1} | Token 估算: ${Math.round(stats.tokenEstimate)} | 状态: ${tokenStatus.status}${colors.reset}\n`);
+
+        history.forEach((entry, index) => {
             if (entry.role === 'user') {
                 console.log(`${colors.cyan}用户:${colors.reset} ${entry.content}`);
             } else if (entry.role === 'assistant') {
                 console.log(`${colors.green}Agent:${colors.reset} ${entry.content.substring(0, 200)}${entry.content.length > 200 ? '...' : ''}`);
+            } else if (entry.role === 'system') {
+                // 跳过系统消息或显示摘要
+                return;
             }
-            if (index < this.conversationHistory.length - 1) {
+            if (index < history.length - 1) {
                 console.log();
             }
         });
@@ -451,11 +491,37 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
         }
 
         try {
-            // 重新创建 Agent
-            this.agent = new Agent.ReActAgent(vendor, model, this.tools, {
+            // 创建新的 LLM 客户端
+            const llmClient = Models.createModel(vendor, model);
+
+            // 重新创建 ReActAgent（任务执行器）
+            this.reactAgent = new Agent.ReActAgent(vendor, model, this.tools, {
                 verbose: this.options.verbose,
                 maxIterations: 10
             });
+
+            // 重新创建 BaseLLMService（对话管理层），保留原有上下文
+            const oldHistory = this.baseLLMService.getHistory();
+            this.baseLLMService = new BaseLLMService(llmClient, {
+                verbose: this.options.verbose,
+                maxMessages: 20,
+                tokenLimit: 1024 * 64,
+                useIntentRecognition: true,
+                language: process.env.PROMPTS_LANG || 'cn'
+            });
+
+            // 恢复历史上下文（可选）
+            if (oldHistory.length > 1) {
+                for (let i = 1; i < oldHistory.length; i++) {
+                    const msg = oldHistory[i];
+                    this.baseLLMService.sessionChat.addMessage(msg.role, msg.content);
+                }
+            }
+
+            // 重新关联
+            this.baseLLMService.setReActAgent(this.reactAgent);
+            this.baseLLMService.registerTools(this.tools);
+
             this.options.vendor = vendor;
             this.options.model = model;
             log.success(`已切换到: ${vendor} / ${model}`);
@@ -466,15 +532,19 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
 
     /**
      * 执行对话
+     * 新架构：通过 BaseLLMService 处理，支持意图识别和上下文保持
      */
     async chat(query) {
-        // 记录用户输入
-        this.conversationHistory.push({ role: 'user', content: query });
-
         try {
             console.log(); // 空行
 
-            await this.agent.runStream(query, (chunk) => {
+            // 使用 BaseLLMService 进行流式对话
+            // 它会自动处理：
+            // 1. 意图识别（判断是否需要工具）
+            // 2. 直接对话（不需要工具时）
+            // 3. 调用 ReActAgent（需要工具时）
+            // 4. 上下文管理（所有对话历史都保存在 BaseLLMService 中）
+            await this.baseLLMService.streamChat(query, (chunk) => {
                 switch (chunk.type) {
                     case 'start':
                         // 静默开始
@@ -513,12 +583,11 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
                     case 'max_iterations':
                         log.warning(chunk.message);
                         break;
+                    case 'complete':
+                        // 对话完成，上下文已自动保存
+                        break;
                 }
             });
-
-            // 记录助手回复 (获取最后一次对话)
-            // 注意: ReActAgent 不直接暴露对话历史，所以这里只记录查询
-            // 实际历史由 Agent 内部管理
 
         } catch (error) {
             log.error(`对话出错: ${error.message}`);
