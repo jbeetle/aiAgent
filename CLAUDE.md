@@ -44,9 +44,30 @@ node test/influencer-joke-agent/index.js
 
 ## Architecture Overview
 
-The framework exports three main namespaces from `src/index.js`:
+The framework exports four main namespaces from `src/index.js`:
 
 ### 1. `Agent` Namespace (`src/agents/`)
+
+**ReActAgent** (`react.agent.js`): The core agent implementing the ReAct pattern.
+- Uses a loop that alternates between LLM reasoning and tool execution
+- Parses LLM responses to extract Thought, Action, Action Input, and Final Answer
+- **Legacy methods** (backward compatible): `run()` (non-streaming) and `runStream()` (streaming with callbacks)
+- **New stateless methods**: `executeTask()` and `executeTaskStream()` for external context
+- Default config: `maxIterations: 5`, `max_tokens: 1042`
+
+**PromptFactory** (`utils/prompt.factory.js`): Manages multilingual prompt templates.
+- Supports 'cn' (Chinese) and 'en' (English) via `PROMPTS_LANG` env var
+- Creates ReAct prompts dynamically based on available tools
+- Reads from `prompts.cn.js` or `prompts.en.js`
+
+### 2. `Conversation` Namespace (`src/agents/conversation/`)
+
+**BaseLLMService** (`base.llm.service.js`): High-level conversation management service.
+- Encapsulates SessionChat for cross-conversation context management
+- Implements intent recognition (keyword + LLM hybrid strategy)
+- Coordinates with ReActAgent for tool execution
+- Provides unified `chat()` and `streamChat()` interfaces
+- Manages tool registration and routing decisions
 
 **ReActAgent** (`react.agent.js`): The core agent implementing the ReAct pattern.
 - Uses a loop that alternates between LLM reasoning and tool execution
@@ -59,7 +80,7 @@ The framework exports three main namespaces from `src/index.js`:
 - Creates ReAct prompts dynamically based on available tools
 - Reads from `prompts.cn.js` or `prompts.en.js`
 
-### 2. `Models` Namespace (`src/agents/models/`)
+### 3. `Models` Namespace (`src/agents/models/`)
 
 **LLMClient** (`llm.client.js`): Unified client for LLM APIs.
 - Wraps OpenAI SDK with configurable HTTP connection pooling (undici)
@@ -77,12 +98,19 @@ The framework exports three main namespaces from `src/index.js`:
 - Implements sliding window and compression when thresholds are exceeded
 - Supports both regular `chat()` and streaming `streamChat()` modes
 
+**BaseLLMService** (`conversation/base.llm.service.js`): High-level conversation management layer.
+- Encapsulates SessionChat for cross-conversation context management
+- Implements intent recognition (keyword + LLM hybrid strategy)
+- Smart routing between direct chat and tool execution
+- Coordinates with ReActAgent for task execution
+- Key methods: `chat()`, `streamChat()`, `setReActAgent()`, `registerTools()`
+
 **McpClient** (`mcp.client.js`): MCP (Model Context Protocol) integration.
 - Connects to external MCP servers via HTTP or stdio
 - `chatWithMcpTools()` analyzes user intent and automatically invokes appropriate MCP tools
 - Manages multiple server connections concurrently
 
-### 3. `Tools` Namespace (`src/agents/tools/`)
+### 4. `Tools` Namespace (`src/agents/tools/`)
 
 **Tool System** (`tool.js`):
 - Four built-in tools: calculator, random_number, advanced_calculator, get_current_time
@@ -100,7 +128,7 @@ The framework exports three main namespaces from `src/index.js`:
 }
 ```
 
-### 4. `Skills` Namespace (`src/skills/`)
+### 5. `Skills` Namespace (`src/skills/`)
 
 **Skill System** provides high-level workflow composition through JSON/YAML definitions:
 
@@ -125,9 +153,14 @@ The framework exports three main namespaces from `src/index.js`:
 - `doc_generate` - Documentation generation from code
 - `system_info` - System information collection
 
-### 5. CLI Tool (`bin/cli.js`)
+### 6. CLI Tool (`bin/cli.js`)
 
-Interactive command-line interface for the framework.
+Interactive command-line interface for the framework. Uses a layered architecture:
+
+**Architecture:**
+- **BaseLLMService**: Primary conversation interface, manages cross-conversation context
+- **ReActAgent**: Stateless task executor for tool invocations
+- **Context Preservation**: All conversation history maintained in BaseLLMService (not ReActAgent)
 
 **CLI Commands:**
 - `/load <filepath>` - Load skill from file
@@ -136,9 +169,9 @@ Interactive command-line interface for the framework.
 - `/reload <skillname>` - Reload skill
 - `/list` - List loaded skills
 - `/builtin` - Load built-in skills
-- `/clear` - Clear conversation history
-- `/history` - Show conversation history
-- `/model <vendor> <model>` - Switch LLM model
+- `/clear` - Clear conversation history (both services)
+- `/history` - Show conversation history with token statistics
+- `/model <vendor> <model>` - Switch LLM model (recreates both services)
 - `/help` - Show help
 - `/exit` - Exit CLI
 
@@ -151,21 +184,72 @@ node bin/cli.js [options]
   --verbose                Enable verbose logging
 ```
 
+**Context Display:**
+The CLI banner shows: `Context: N messages` - indicating the current conversation context size.
+
 ## ReAct Pattern Implementation
 
-The ReAct pattern is implemented in `ReActAgent.run()`:
+The ReAct pattern is implemented in `ReActAgent`:
+
+### Core Methods
+
+**`run(query)`**: Legacy method (backward compatible)
+- Creates temporary message context with system prompt + query
+- Runs ReAct loop and returns final answer
+- Maintains internal `conversationHistory` for compatibility
+
+**`runStream(query, onChunk)`**: Legacy streaming method (backward compatible)
+- Same as `run()` but with streaming callbacks
+- Provides granular events: 'thinking', 'tool_start', 'tool_result', 'final_answer'
+
+**`executeTask(taskConfig, callbacks)`**: New stateless task execution
+- Accepts external context via `taskConfig.contextMessages`
+- Stateless - does not maintain its own conversation history
+- Designed to be called by `BaseLLMService`
+- `taskConfig` includes: `query`, `contextMessages`, `tools`, `suggestedTools`
+
+**`executeTaskStream(taskConfig, onChunk)`**: New stateless streaming execution
+- Streaming version of `executeTask()`
+- Same event types as `runStream()`
+
+### Execution Flow
 
 1. **System Prompt**: Generated by PromptFactory with tool descriptions
-2. **Iteration Loop**: Up to `maxIterations` cycles of:
+2. **Context Building**: `#buildMessagesWithContext()` combines system prompt + external context + query
+3. **Iteration Loop**: Up to `maxIterations` cycles of:
    - Send messages to LLM
    - Parse response for Thought/Action/Action Input/Final Answer
    - If Final Answer: return it
    - If Action: execute tool, append observation to messages
-3. **Response Parsing** (`#parseResponse()`): Line-based parsing looking for:
+4. **Response Parsing** (`#parseResponse()`): Line-based parsing looking for:
    - `Thought:` prefix for reasoning
    - `Action:` prefix for tool name
    - `Action Input:` prefix for arguments (JSON or string)
    - `Final Answer:` prefix for completion
+
+### Architecture Flow (New)
+
+With the new architecture, the typical CLI flow is:
+
+```
+User Input
+    ↓
+BaseLLMService.chat() / streamChat()
+    ↓
+Intent Recognition (keyword/LLM)
+    ↓
+┌──────────┴──────────┐
+↓                     ↓
+Direct Chat       Tool Needed
+(SessionChat)         ↓
+    ↓           ReActAgent.executeTask()
+    ↓                 ↓
+    └────────┬────────┘
+             ↓
+    Integrate result into SessionChat
+             ↓
+    Return final answer
+```
 
 ## Skill Execution Flow
 
@@ -226,3 +310,17 @@ VOLC_BASE_URL=...      # Custom base URL for Volcano
 - `{{steps.stepId.output}}` - Previous step output reference
 - `{{outputs.key}}` - Saved output values
 - `{{env.VAR_NAME}}` - Environment variable access
+
+**BaseLLMService Intent Recognition:**
+- **Keyword Matching**: Fast path for common patterns (greetings, math expressions, etc.)
+  - High confidence patterns: '计算', 'calculate', '查询' → needs tools
+  - High confidence patterns: '你好', 'hello', '谢谢' → direct chat
+- **LLM Confirmation**: For ambiguous inputs, uses LLM to classify intent
+  - Returns JSON: `{needs_tools: boolean, confidence: string, reason: string}`
+- **Smart Routing**: Routes to direct chat or ReActAgent based on intent
+
+**Context Management:**
+- **Sliding Window**: Keeps recent N messages (default: 20)
+- **Token Compression**: Automatically compresses history when token limit exceeded
+- **Threshold-based**: Compresses when messages > 15 or tokens > 64K
+- **Token Estimation**: Rough estimate: Chinese chars × 1.5 + English words × 1.3
