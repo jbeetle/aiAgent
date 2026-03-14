@@ -380,23 +380,46 @@ export class SkillEngine {
    */
   #resolveStringVariables(template, context) {
     return template
-      // {{parameters.xxx}}
-      .replace(/\{\{parameters\.(\w+)\}\}/g, (match, key) => {
-        return context.parameters[key] !== undefined ? context.parameters[key] : match;
+      // {{parameters.xxx}} 或 {{parameters.xxx.yyy}}
+      .replace(/\{\{parameters\.([\w.]+)\}\}/g, (match, key) => {
+        const value = this.#getNestedValue(context.parameters, key);
+        return value !== undefined ? value : match;
       })
-      // {{steps.xxx.output}}
-      .replace(/\{\{steps\.(\w+)\.output\}\}/g, (match, key) => {
-        const step = context.steps[key];
-        return step && step.output !== undefined ? step.output : match;
+      // {{steps.xxx.output}} 或 {{steps.xxx.output.yyy}}
+      .replace(/\{\{steps\.(\w+)\.output(?:\.([\w.]+))?\}\}/g, (match, stepKey, nestedPath) => {
+        const step = context.steps[stepKey];
+        if (!step || step.output === undefined) return match;
+        if (nestedPath) {
+          const value = this.#getNestedValue(step.output, nestedPath);
+          return value !== undefined ? value : match;
+        }
+        return step.output;
       })
-      // {{outputs.xxx}}
-      .replace(/\{\{outputs\.(\w+)\}\}/g, (match, key) => {
-        return context.outputs[key] !== undefined ? context.outputs[key] : match;
+      // {{outputs.xxx}} 或 {{outputs.xxx.yyy}}
+      .replace(/\{\{outputs\.([\w.]+)\}\}/g, (match, key) => {
+        const value = this.#getNestedValue(context.outputs, key);
+        return value !== undefined ? value : match;
       })
       // {{env.xxx}}
       .replace(/\{\{env\.(\w+)\}\}/g, (match, key) => {
         return process.env[key] !== undefined ? process.env[key] : match;
       });
+  }
+
+  /**
+   * 获取嵌套对象的值
+   * @param {Object} obj - 对象
+   * @param {string} path - 路径，如 "content" 或 "data.items.0"
+   * @returns {any} - 值
+   */
+  #getNestedValue(obj, path) {
+    const keys = path.split('.');
+    let value = obj;
+    for (const key of keys) {
+      if (value === undefined || value === null) return undefined;
+      value = value[key];
+    }
+    return value;
   }
 }
 

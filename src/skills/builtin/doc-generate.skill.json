@@ -41,7 +41,7 @@
       {
         "id": "generate_doc",
         "type": "llm",
-        "prompt": "请为以下代码生成{{parameters.doc_type}}类型的文档，使用{{parameters.style}}风格：\n\n```\n{{steps.read_source.output}}\n```\n\n要求：\n1. 文档应清晰、完整、专业\n2. 包含所有公共API的说明\n3. 提供使用示例\n4. 遵循{{parameters.style}}文档规范",
+        "prompt": "请为以下代码生成{{parameters.doc_type}}类型的文档，使用{{parameters.style}}风格：\n\n```\n{{steps.read_source.output.content}}\n```\n\n要求：\n1. 文档应清晰、完整、专业\n2. 包含所有公共API的说明\n3. 提供使用示例\n4. 遵循{{parameters.style}}文档规范",
         "output_key": "generated_documentation"
       },
       {
