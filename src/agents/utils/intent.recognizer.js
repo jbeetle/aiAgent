@@ -490,16 +490,21 @@ export class IntentRecognizer {
         if (isCN) {
             return `请分析以下用户输入，判断是否需要调用工具或技能来完成。
 
-${toolDescriptions ? `可用工具列表：\n${toolDescriptions}\n` : ''}
-${skillDescriptions ? `\n可用技能列表：\n${skillDescriptions}\n` : ''}
+重要提示：
+- 简单对话、闲聊、问候、询问时间/日期等日常问题，直接用语言回答即可，不需要调用工具
+- 只有当用户明确要求执行特定任务（如计算、文件操作、代码执行、数据分析等）时才需要工具
+- 如果用户只是询问信息或聊天，needs_tools 应该为 false
+
+${toolDescriptions ? `可用工具列表（仅供参考，不要滥用）：\n${toolDescriptions}\n` : ''}
+${skillDescriptions ? `\n可用技能列表（仅供参考，不要滥用）：\n${skillDescriptions}\n` : ''}
 
 用户输入："""${input}"""
 
 请分析：
-1. 用户的真实意图是什么？
-2. 是否需要调用工具或技能来完成这个请求？
-3. 如果需要，哪些工具或技能最相关？（请参考技能的 capabilities 和 category）
-4. 如果不需要，为什么？
+1. 这是简单对话/闲聊，还是需要执行特定任务？
+2. 用户是否在询问时间、日期、天气等可以直接回答的信息？
+3. 是否需要调用工具或技能来完成这个请求？
+4. 如果需要，哪些工具或技能最相关？
 
 请以 JSON 格式回复（不要包含任何其他文字）：
 {
@@ -515,16 +520,21 @@ ${skillDescriptions ? `\n可用技能列表：\n${skillDescriptions}\n` : ''}
         } else {
             return `Please analyze the following user input and determine if tools or skills need to be called.
 
-${toolDescriptions ? `Available tools:\n${toolDescriptions}\n` : ''}
-${skillDescriptions ? `\nAvailable skills:\n${skillDescriptions}\n` : ''}
+Important guidelines:
+- Simple conversation, greetings, asking about time/date/weather should be answered directly without tools
+- Only use tools when the user explicitly requests specific tasks (calculations, file operations, code execution, data analysis)
+- If the user is just asking for information or chatting, needs_tools should be false
+
+${toolDescriptions ? `Available tools (for reference only, use sparingly):\n${toolDescriptions}\n` : ''}
+${skillDescriptions ? `\nAvailable skills (for reference only, use sparingly):\n${skillDescriptions}\n` : ''}
 
 User input: """${input}"""
 
 Please analyze:
-1. What is the user's real intent?
-2. Do we need to call tools or skills to fulfill this request?
-3. If yes, which tools or skills are most relevant? (Consider capabilities and category)
-4. If no, why not?
+1. Is this simple conversation/chat, or a specific task to execute?
+2. Is the user asking about time, date, weather, etc. that can be answered directly?
+3. Do we need to call tools or skills to fulfill this request?
+4. If yes, which tools or skills are most relevant?
 
 Please respond in JSON format (no other text):
 {
