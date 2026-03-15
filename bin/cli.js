@@ -286,9 +286,6 @@ class CLIAgent {
             case '/history':
                 this.showHistory();
                 break;
-            case '/intent':
-                this.handleIntentCommand(args);
-                break;
             default:
                 log.warning(`未知命令: ${command}, 输入 /help 查看可用命令`);
         }
@@ -303,16 +300,15 @@ class CLIAgent {
         const skillCount = this.reactAgent.getSkillSummaries().length;
         const stats = this.baseLLMService.getStats();
         const contextCount = Math.max(0, (stats.messageCount || 1) - 1);
-        const intentConfig = this.baseLLMService.getIntentRecognitionConfig();
-        const intentMode = intentConfig ? intentConfig.mode : 'disabled';
+        const refinementEnabled = this.baseLLMService.config.enableRefinement;
         console.log(`
 ${colors.bright}${colors.cyan}🤖 ReAct Agent CLI${colors.reset}
 ${colors.dim}==================${colors.reset}
 ${colors.blue}Provider:${colors.reset} ${this.options.vendor}
 ${colors.blue}Model:${colors.reset}    ${this.options.model}
 ${colors.blue}Skills:${colors.reset}   ${skillCount} loaded
-${colors.blue}Intent:${colors.reset}   ${intentMode} mode
-${colors.dim}Context:${colors.reset}  ${contextCount} messages
+${colors.blue}Context:${colors.reset}  ${refinementEnabled ? 'enabled' : 'disabled'}
+${colors.dim}Messages:${colors.reset} ${contextCount} messages
 
 ${colors.dim}Type /help for commands or start chatting!${colors.reset}
 `);
@@ -336,7 +332,6 @@ ${colors.yellow}对话控制:${colors.reset}
   /clear                 清除对话历史
   /history               显示对话历史
   /model <vendor> <model> 切换 LLM 模型
-  /intent [mode]         查看或设置意图识别模式 (aggressive|conservative|balanced)
 
 ${colors.yellow}其他:${colors.reset}
   /help, /h              显示此帮助
@@ -521,48 +516,6 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
     }
 
     /**
-     * 处理意图识别命令
-     */
-    handleIntentCommand(args) {
-        if (args.length === 0) {
-            // 显示当前配置
-            const config = this.baseLLMService.getIntentRecognitionConfig();
-            if (config) {
-                console.log(`\n${colors.bright}意图识别配置:${colors.reset}`);
-                console.log(`  模式: ${colors.cyan}${config.mode}${colors.reset}`);
-                console.log(`  使用工具描述: ${config.useToolDescriptions ? colors.green + '是' : colors.red + '否'}${colors.reset}`);
-                console.log(`  使用Skill描述: ${config.useSkillDescriptions ? colors.green + '是' : colors.red + '否'}${colors.reset}`);
-                console.log(`  LLM确认阈值: ${config.llmConfirmationThreshold}`);
-                console.log(`  语义匹配: ${config.enableSemanticMatching ? colors.green + '启用' : colors.red + '禁用'}${colors.reset}`);
-                console.log(`  最小相关度: ${config.minToolRelevanceScore}`);
-                console.log();
-                console.log(`${colors.dim}使用 /intent <mode> 切换模式${colors.reset}`);
-                console.log(`${colors.dim}模式说明: aggressive=激进, conservative=保守, balanced=平衡${colors.reset}`);
-            } else {
-                log.warning('意图识别未启用');
-            }
-            return;
-        }
-
-        const mode = args[0].toLowerCase();
-        if (['aggressive', 'conservative', 'balanced'].includes(mode)) {
-            this.baseLLMService.setIntentRecognitionMode(mode);
-            log.success(`意图识别模式已切换为: ${colors.cyan}${mode}${colors.reset}`);
-
-            // 显示模式说明
-            const descriptions = {
-                aggressive: '激进模式 - 模糊输入默认使用工具，最大化工具使用率',
-                conservative: '保守模式 - 只有高置信度才使用工具，减少误触发',
-                balanced: '平衡模式 - 默认模式，在工具使用和直接对话间取得平衡'
-            };
-            console.log(`${colors.dim}${descriptions[mode]}${colors.reset}`);
-        } else {
-            log.error(`未知模式: ${mode}`);
-            console.log(`${colors.dim}可用模式: aggressive, conservative, balanced${colors.reset}`);
-        }
-    }
-
-    /**
      * 切换模型
      */
     async switchModel(vendor, model) {
@@ -587,11 +540,11 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
                 verbose: this.options.verbose,
                 maxMessages: 20,
                 tokenLimit: 1024 * 64,
-                useIntentRecognition: true,
+                enableRefinement: true,
                 language: process.env.PROMPTS_LANG || 'cn'
             });
 
-            // 恢复历史上下文（可选）
+            // 恢复历史上下文
             if (oldHistory.length > 1) {
                 for (let i = 1; i < oldHistory.length; i++) {
                     const msg = oldHistory[i];
@@ -620,13 +573,16 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
             console.log(); // 空行
 
             // 使用 BaseLLMService 进行流式对话
-            // 它会自动处理：
-            // 1. 意图识别（判断是否需要工具）
-            // 2. 直接对话（不需要工具时）
-            // 3. 调用 ReActAgent（需要工具时）
-            // 4. 上下文管理（所有对话历史都保存在 BaseLLMService 中）
+            // 新架构流程：
+            // 1. analyzeIntent() - 基于对话历史理解用户意图，完善问题描述
+            // 2. executeTaskStream() - 交给 ReActAgent 全权处理（自主决定是否使用工具）
+            // 3. 上下文管理（所有对话历史都保存在 BaseLLMService 中）
             await this.baseLLMService.streamChat(query, (chunk) => {
                 switch (chunk.type) {
+                    case 'intent_refined':
+                        // 显示意图理解结果（仅在 verbose 模式）
+                        this.#logVerbose('意图理解', `${chunk.original} → ${chunk.refined}`);
+                        break;
                     case 'parsed':
                         if (chunk.thought) log.thinking(chunk.thought);
                         break;

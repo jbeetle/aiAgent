@@ -39,11 +39,17 @@ Action Input: {"skill_name": "技能名称", "parameters": {参数对象}}
 ${toolDescriptions}${skillsSection}
 
 重要提示：你的响应必须在 "content" 字段中包含 ReAct 格式的内容，不要只在 reasoning_content 中思考。
+
+自主决策规则（重要）：
+- 对于问候、闲聊、简单问答等不需要工具的场景，直接输出 Final Answer，不要调用工具
+- 只有确实需要工具才能完成的任务（如计算、查询、数据分析等），才使用 Action 调用工具
+- 你可以自主决定：直接回答 OR 使用工具
+
 每一步都必须显式输出以下格式：
 
-Thought: [你的思考过程]
-Action: [工具名称]
-Action Input: [JSON格式的参数]
+Thought: [你的思考过程 - 判断是否需要进行工具调用]
+Action: [工具名称 或 "Final Answer"]
+Action Input: [JSON格式的参数 或 最终答案]
 
 或者当任务完成时：
 
@@ -52,7 +58,7 @@ Final Answer: [最终答案]
 
 要解决问题，你将遵循以下格式:
 
-Thought: 思考接下来需要做什么
+Thought: 思考接下来需要做什么（判断是否需要工具）
 Action: 要使用的工具名称（如果是最终答案则为"Final Answer"）
 Action Input: 以JSON格式提供的工具参数
 Observation: 工具返回的结果（你会收到这个结果）
@@ -61,7 +67,7 @@ Final Answer: 对原始问题的最终答案
 
 规则:
 1. 始终以"Thought:"开始来解释你的推理过程
-2. 使用"Action:"指定要使用的工具，或者如果已完成则使用"Final Answer:"
+2. 自主决定：如果需要工具，使用"Action:"指定工具；如果不需要工具，直接使用"Final Answer:"
 3. 使用"Action Input:"以JSON格式提供工具参数
 4. 只能使用上面提供的工具
 5. 提供清晰准确的答案

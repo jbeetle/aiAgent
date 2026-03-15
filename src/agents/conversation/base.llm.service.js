@@ -5,14 +5,14 @@ import {IntentRecognizer} from '../utils/intent.recognizer.js';
 /**
  * BaseLLMService - 基础 LLM 对话服务层
  *
- * 核心职责：
+ * 核心职责（新架构）：
  * 1. 封装 SessionChat，管理跨对话上下文（滑动窗口、压缩、token 估算）
- * 2. 实现意图识别（关键词 + LLM 混合策略）
- * 3. 协调与 ReActAgent 的交互，作为无状态任务执行器
+ * 2. 基于对话历史理解用户真实意图，处理指代消解和省略补充
+ * 3. 生成完整、明确的问题描述，交给 ReActAgent 全权处理
  *
  * 架构分层：
- * - 基础对话层：BaseLLMService (有状态，管理上下文)
- * - 任务执行层：ReActAgent (无状态，执行工具)
+ * - 基础对话层：BaseLLMService (有状态，管理上下文 + 意图理解)
+ * - 任务执行层：ReActAgent (无状态，自主决策是否使用工具)
  */
 export class BaseLLMService {
     #log;
@@ -30,13 +30,10 @@ export class BaseLLMService {
      * @param {number} [config.maxMessages=20] - 最大消息数量
      * @param {number} [config.tokenLimit=65536] - token 限制
      * @param {boolean} [config.verbose=false] - 启用详细日志
-     * @param {boolean} [config.useIntentRecognition=true] - 是否使用意图识别
+     * @param {boolean} [config.useIntentRecognition=true] - 是否使用意图理解（用于多轮对话的指代消解）
      * @param {string} [config.language] - 语言 ('cn' | 'en')
-     * @param {Object} [config.intentRecognition] - 意图识别配置
-     * @param {string} [config.intentRecognition.mode='balanced'] - 识别模式: 'aggressive' | 'conservative' | 'balanced'
-     * @param {boolean} [config.intentRecognition.useToolDescriptions=true] - 是否使用工具描述
-     * @param {boolean} [config.intentRecognition.useSkillDescriptions=true] - 是否使用 Skill 描述
-     * @param {string} [config.intentRecognition.llmConfirmationThreshold='medium'] - LLM 确认阈值: 'low' | 'medium' | 'high'
+     * @param {Object} [config.intentRecognition] - 意图理解配置（保留配置兼容性）
+     * @param {boolean} [config.enableRefinement=true] - 是否启用问题完善（指代消解、省略补充）
      */
     constructor(llmClient, config = {}) {
         this.config = {
@@ -46,6 +43,7 @@ export class BaseLLMService {
             verbose: false,
             systemPrompt: null,
             useIntentRecognition: true,
+            enableRefinement: true,  // 是否启用问题完善
             language: process.env.PROMPTS_LANG || 'cn',
             intentRecognition: {
                 mode: 'balanced',
@@ -125,6 +123,9 @@ export class BaseLLMService {
 
     /**
      * 主入口：对话处理
+     * 新架构：始终交给 ReActAgent 处理（让 ReActAgent 自主决定是否使用工具）
+     * BaseLLMService 负责基于对话历史完善问题描述
+     *
      * @param {string} input - 用户输入
      * @returns {Promise<Object>} - 响应结果
      */
@@ -132,24 +133,12 @@ export class BaseLLMService {
         try {
             this.#log('处理用户输入:', input);
 
-            // 1. 意图识别
-            const intent = await this.#analyzeIntent(input);
-            this.#log('意图识别结果:', intent);
+            // 1. 基于对话历史理解用户意图，完善问题描述
+            const analysis = await this.analyzeIntent(input);
+            this.#log('意图分析结果:', analysis);
 
-            // 2. 根据意图选择处理路径
-            if (intent.needsTools) {
-                // 需要工具：调用 ReActAgent
-                return await this.#executeWithTools(input, intent);
-            } else {
-                // 直接对话：使用 SessionChat
-                const response = await this.sessionChat.chat(input);
-                return {
-                    success: true,
-                    answer: response,
-                    type: 'direct',
-                    intent: intent
-                };
-            }
+            // 2. 交给 ReActAgent 全权处理（ReActAgent 自主决定是否使用工具）
+            return await this.#executeWithTools(analysis.refinedQuery, analysis);
         } catch (error) {
             this.#log('对话处理错误:', error);
             return {
@@ -162,6 +151,9 @@ export class BaseLLMService {
 
     /**
      * 流式对话处理
+     * 新架构：始终交给 ReActAgent 处理（让 ReActAgent 自主决定是否使用工具）
+     * BaseLLMService 负责基于对话历史完善问题描述
+     *
      * @param {string} input - 用户输入
      * @param {Function} onChunk - 流式回调函数
      * @returns {Promise<Object>} - 最终响应结果
@@ -170,18 +162,12 @@ export class BaseLLMService {
         try {
             this.#log('开始流式处理:', input);
 
-            // 1. 意图识别（使用缓存或简单规则避免重复调用）
-            const intent = await this.#analyzeIntent(input);
-            this.#log('意图识别结果:', intent);
+            // 1. 基于对话历史理解用户意图，完善问题描述
+            const analysis = await this.analyzeIntent(input);
+            this.#log('意图分析结果:', analysis);
 
-            // 2. 根据意图选择处理路径
-            if (intent.needsTools && this.#reactAgent) {
-                // 需要工具：调用 ReActAgent
-                return await this.#executeWithToolsStream(input, intent, onChunk);
-            } else {
-                // 直接对话：使用 SessionChat 流式
-                return await this.#streamDirectChat(input, onChunk);
-            }
+            // 2. 交给 ReActAgent 全权处理（ReActAgent 自主决定是否使用工具）
+            return await this.#executeWithToolsStream(analysis.refinedQuery, analysis, onChunk);
         } catch (error) {
             this.#log('流式对话错误:', error);
             if (onChunk) {
@@ -200,8 +186,195 @@ export class BaseLLMService {
     }
 
     /**
-     * 意图识别（使用 IntentRecognizer）
+     * 基于对话历史理解用户意图，生成完整、明确的问题描述
+     *
+     * 核心职责：
+     * 1. 基于对话历史理解用户真实意图
+     * 2. 处理指代消解（"它"指的是什么）
+     * 3. 补充省略的上下文
+     * 4. 生成完整、明确的问题描述
+     *
+     * @param {string} input - 用户当前输入
+     * @returns {Promise<Object>} - 意图分析结果
+     *   - refinedQuery: 完善后的问题描述
+     *   - needsRefinement: 是否进行了完善
+     *   - originalInput: 原始输入
+     */
+    async analyzeIntent(input) {
+        this.#log('分析用户意图:', input);
+
+        // 获取对话历史（排除系统消息）
+        const history = this.sessionChat.getHistory().filter(msg => msg.role !== 'system');
+
+        // 快速路径：第一轮对话或非常明确的输入，直接返回
+        if (this.#shouldSkipRefinement(input, history)) {
+            this.#log('跳过意图完善，直接返回原输入');
+            return {
+                refinedQuery: input,
+                needsRefinement: false,
+                originalInput: input
+            };
+        }
+
+        // 如果禁用了问题完善功能，直接返回原输入
+        if (!this.config.enableRefinement) {
+            return {
+                refinedQuery: input,
+                needsRefinement: false,
+                originalInput: input
+            };
+        }
+
+        try {
+            // 基于历史对话理解用户意图
+            const prompt = this.#createIntentAnalysisPrompt(input, history);
+
+            const response = await this.llmClient.getRawClient().chat.completions.create({
+                model: this.model,
+                messages: [
+                    {
+                        role: 'system',
+                        content: this.config.language === 'cn'
+                            ? '你是一个专业的意图理解助手。基于对话历史，理解用户的真实意图并生成完整的问题描述。'
+                            : 'You are a professional intent understanding assistant. Based on conversation history, understand the user\'s true intent and generate a complete, clear problem description.'
+                    },
+                    { role: 'user', content: prompt }
+                ],
+                max_tokens: 500,
+                temperature: 0.1
+            });
+
+            const refinedQuery = response.choices[0].message.content.trim();
+
+            // 如果完善后的结果与原输入相同或为空，使用原输入
+            if (!refinedQuery || refinedQuery === input) {
+                return {
+                    refinedQuery: input,
+                    needsRefinement: false,
+                    originalInput: input
+                };
+            }
+
+            this.#log('意图完善结果:', refinedQuery);
+
+            return {
+                refinedQuery,
+                needsRefinement: true,
+                originalInput: input
+            };
+
+        } catch (error) {
+            this.#log('意图分析失败，使用原输入:', error.message);
+            // 出错时返回原输入
+            return {
+                refinedQuery: input,
+                needsRefinement: false,
+                originalInput: input,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * 判断是否跳过意图完善
      * @private
+     */
+    #shouldSkipRefinement(input, history) {
+        // 第一轮对话，不需要完善
+        if (history.length === 0) {
+            return true;
+        }
+
+        // 只有一条消息（系统消息），不需要完善
+        const nonSystemMessages = history.filter(msg => msg.role !== 'system');
+        if (nonSystemMessages.length === 0) {
+            return true;
+        }
+
+        const lowerInput = input.toLowerCase().trim();
+
+        // 非常明确的查询，不需要完善
+        const explicitPatterns = [
+            // 数学表达式
+            /^[\d\s\+\-\*\/\(\)\.]+$/,
+            // 明确的命令
+            /^(计算|算一下|求解|查询|获取|执行|运行)\s+/i,
+            // 完整的句子（较长）
+            /^.{30,}$/
+        ];
+
+        for (const pattern of explicitPatterns) {
+            if (pattern.test(input)) {
+                return true;
+            }
+        }
+
+        // 不包含可能的指代词，且输入较长，可能不需要完善
+        const anaphoraWords = ['它', '这个', '那个', '他', '她', '它们', '这些', '那些',
+            'it', 'this', 'that', 'they', 'them', 'these', 'those'];
+        const hasAnaphora = anaphoraWords.some(word => lowerInput.includes(word.toLowerCase()));
+
+        // 不包含省略迹象（如问句不完整）
+        const omissionPatterns = ['多少钱', '多少', '呢', '怎么样', '好吗', '可以吗'];
+        const hasOmission = omissionPatterns.some(p => lowerInput.includes(p));
+
+        if (!hasAnaphora && !hasOmission && input.length > 10) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 创建意图分析提示词
+     * @private
+     */
+    #createIntentAnalysisPrompt(input, history) {
+        const isCN = this.config.language === 'cn';
+
+        // 格式化历史对话
+        const formattedHistory = history.slice(-6).map(msg => {
+            const role = msg.role === 'user' ? (isCN ? '用户' : 'User') : (isCN ? '助手' : 'Assistant');
+            return `${role}: ${msg.content}`;
+        }).join('\n');
+
+        if (isCN) {
+            return `基于以下对话历史，理解用户的真实意图并生成完整、明确的问题描述。
+
+任务说明：
+1. 处理指代消解：将"它"、"这个"、"那个"等指代词替换为具体对象
+2. 补充省略的上下文：根据历史对话补全省略的信息
+3. 生成完整的问题描述，使其不依赖历史也能被理解
+
+对话历史：
+${formattedHistory}
+
+当前输入："${input}"
+
+请生成一个完整、明确的问题描述。如果输入已经很清晰，直接返回原样。
+只返回完善后的问题描述，不要添加任何解释。`;
+        } else {
+            return `Based on the following conversation history, understand the user's true intent and generate a complete, clear problem description.
+
+Task:
+1. Resolve anaphora: Replace pronouns like "it", "this", "that" with specific references
+2. Supplement omitted context: Add missing information based on conversation history
+3. Generate a complete question description that can be understood without history
+
+Conversation History:
+${formattedHistory}
+
+Current Input: "${input}"
+
+Please generate a complete, clear problem description. If the input is already clear, return it as is.
+Return only the refined question, no explanations.`;
+        }
+    }
+
+    /**
+     * 意图识别（保留向后兼容）
+     * @private
+     * @deprecated 新架构中不再使用二元意图判断，使用 analyzeIntent 替代
      */
     async #analyzeIntent(input) {
         // 如果没有启用意图识别或没有工具，直接返回不需要工具
@@ -217,7 +390,7 @@ export class BaseLLMService {
      * 使用工具执行任务（非流式）
      * @private
      */
-    async #executeWithTools(input, intent) {
+    async #executeWithTools(refinedQuery, analysis) {
         if (!this.#reactAgent) {
             throw new Error('ReActAgent 未设置，无法执行工具调用');
         }
@@ -225,26 +398,26 @@ export class BaseLLMService {
         // 获取当前上下文
         const contextMessages = this.sessionChat.getHistory();
 
-        // 调用 ReActAgent 执行任务
+        // 调用 ReActAgent 执行任务（传递完善后的问题）
         const taskConfig = {
-            query: input,
+            query: refinedQuery,
             contextMessages: contextMessages,
             tools: this.#tools,
-            suggestedTools: intent.suggestedTools || []
+            suggestedTools: analysis.suggestedTools || []
         };
 
         const result = await this.#reactAgent.executeTask(taskConfig);
 
-        // 将结果整合回 SessionChat
+        // 将结果整合回 SessionChat（使用原始输入保存历史）
         if (result.success) {
-            this.sessionChat.addMessage('user', input);
+            this.sessionChat.addMessage('user', analysis.originalInput);
             this.sessionChat.addMessage('assistant', result.answer);
         }
 
         return {
             ...result,
-            type: 'tool_execution',
-            intent: intent
+            type: 'execution',
+            analysis: analysis
         };
     }
 
@@ -252,7 +425,7 @@ export class BaseLLMService {
      * 使用工具执行任务（流式）
      * @private
      */
-    async #executeWithToolsStream(input, intent, onChunk) {
+    async #executeWithToolsStream(refinedQuery, analysis, onChunk) {
         if (!this.#reactAgent) {
             throw new Error('ReActAgent 未设置，无法执行工具调用');
         }
@@ -264,17 +437,28 @@ export class BaseLLMService {
                 message: '开始处理任务...',
                 timestamp: new Date().toISOString()
             });
+
+            // 如果进行了问题完善，通知用户
+            if (analysis.needsRefinement) {
+                onChunk({
+                    type: 'intent_refined',
+                    original: analysis.originalInput,
+                    refined: refinedQuery,
+                    message: `意图理解: "${analysis.originalInput}" → "${refinedQuery}"`,
+                    timestamp: new Date().toISOString()
+                });
+            }
         }
 
         // 获取当前上下文
         const contextMessages = this.sessionChat.getHistory();
 
-        // 调用 ReActAgent 执行流式任务
+        // 调用 ReActAgent 执行流式任务（传递完善后的问题）
         const taskConfig = {
-            query: input,
+            query: refinedQuery,
             contextMessages: contextMessages,
             tools: this.#tools,
-            suggestedTools: intent.suggestedTools || []
+            suggestedTools: analysis.suggestedTools || []
         };
 
         let finalAnswer = '';
@@ -291,61 +475,16 @@ export class BaseLLMService {
             }
         });
 
-        // 将结果整合回 SessionChat
+        // 将结果整合回 SessionChat（使用原始输入保存历史）
         if (result.success && finalAnswer) {
-            this.sessionChat.addMessage('user', input);
+            this.sessionChat.addMessage('user', analysis.originalInput);
             this.sessionChat.addMessage('assistant', finalAnswer);
         }
 
         return {
             ...result,
-            type: 'tool_execution',
-            intent: intent
-        };
-    }
-
-    /**
-     * 直接流式对话
-     * @private
-     */
-    async #streamDirectChat(input, onChunk) {
-        let finalContent = '';
-
-        await this.sessionChat.streamChat(
-            input,
-            (chunk, isReasoning, isDone) => {
-                if (isDone) {
-                    finalContent = chunk;
-                    if (onChunk) {
-                        onChunk({
-                            type: 'final_answer',
-                            message: finalContent,
-                            timestamp: new Date().toISOString()
-                        });
-                        onChunk({
-                            type: 'complete',
-                            result: { success: true, answer: finalContent },
-                            timestamp: new Date().toISOString()
-                        });
-                    }
-                } else {
-                    if (!isReasoning && onChunk) {
-                        onChunk({
-                            type: 'thinking',
-                            content: chunk,
-                            accumulated: finalContent,
-                            timestamp: new Date().toISOString()
-                        });
-                    }
-                    finalContent += chunk;
-                }
-            }
-        );
-
-        return {
-            success: true,
-            answer: finalContent,
-            type: 'direct'
+            type: 'execution',
+            analysis: analysis
         };
     }
 
