@@ -5,7 +5,7 @@
  * 交互式命令行工具，支持自然语言对话和动态 Skill 管理
  */
 
-import {Agent, Models, Tools} from '../src/index.js';
+import {Agent, Models} from '../src/index.js';
 import {BaseLLMService} from './conversation/index.js';
 import readline from 'node:readline/promises';
 import {stdin as input, stdout as output} from 'node:process';
@@ -58,7 +58,8 @@ function parseArgs() {
         vendor: 'DeepSeek',
         model: 'deepseek-chat',
         skillsDir: null,
-        verbose: false
+        verbose: false,
+        direct: false  // 直接模式：绕过 BaseLLMService，直接使用 ReActAgent
     };
 
     for (let i = 0; i < args.length; i++) {
@@ -78,6 +79,10 @@ function parseArgs() {
                 break;
             case '--verbose':
                 options.verbose = true;
+                break;
+            case '--direct':
+            case '-d':
+                options.direct = true;
                 break;
             case '--help':
             case '-h':
@@ -101,13 +106,15 @@ function printHelp() {
 选项:
   -v, --vendor <name>      设置 LLM 提供商 (默认: DeepSeek)
   -m, --model <name>       设置模型名称 (默认: deepseek-chat)
-  -s, --skills-dir <path>  启动时加载技能的目录
+  -s, --skills-dir <path> 启动时加载技能的目录
+  -d, --direct             直接模式：绕过 BaseLLMService，直接使用 ReActAgent
   --verbose                启用详细日志
   -h, --help               显示帮助信息
 
 示例:
   node bin/cli.js
   node bin/cli.js --vendor OpenAI --model gpt-4
+  node bin/cli.js --direct                    # 直接使用 ReActAgent
   node bin/cli.js -s ./my-skills --verbose
 `);
 }
@@ -119,7 +126,6 @@ function printHelp() {
 class CLIAgent {
     constructor(options) {
         this.options = options;
-        this.tools = Tools.getBuiltInTools();
         this.reactAgent = null;
         this.baseLLMService = null;
         this.rl = null;
@@ -128,40 +134,51 @@ class CLIAgent {
 
     /**
      * 初始化 Agent
+     *
+     * 初始化顺序：
+     * 1. 创建 LLM 客户端
+     * 2. 创建 ReActAgent（自动加载内置工具）
+     * 3. 创建 BaseLLMService
+     * 4. 关联 ReActAgent 到 BaseLLMService
+     * 5. 加载 Skills
+     * 6. 创建 readline 接口
      */
     async initialize() {
         try {
-            // 创建 LLM 客户端
+            // 1. 创建 LLM 客户端
             const llmClient = Models.createModel(this.options.vendor, this.options.model);
 
-            // 创建 ReActAgent（仅作为任务执行器）
+            // 2. 创建 ReActAgent（自动加载所有内置工具）
             this.reactAgent = new Agent.ReActAgent(
                 this.options.vendor,
                 this.options.model,
-                this.tools,
+                null, // 不传工具，让 ReActAgent 自动加载内置工具
                 {
                     verbose: this.options.verbose,
                     maxIterations: DEFAULT_MAX_ITERATIONS
                 }
             );
 
-            // 创建 BaseLLMService（主要对话接口，管理跨对话上下文）
+            // 3. 创建 BaseLLMService（主要对话接口，管理跨对话上下文 + 意图识别）
             this.baseLLMService = new BaseLLMService(llmClient, {
                 verbose: this.options.verbose,
                 maxMessages: 20,
                 tokenLimit: 1024 * 64,
                 enableRefinement: true,
+                intentMode: 'balanced',
                 language: process.env.PROMPTS_LANG || 'cn'
             });
 
-            // 关联两者：BaseLLMService 使用 ReActAgent 执行工具任务
+            // 4. 关联两者：BaseLLMService 使用 ReActAgent 执行工具任务
             this.baseLLMService.setReActAgent(this.reactAgent);
-            this.baseLLMService.registerTools(this.tools);
 
-            // 自动加载内置 skills
+            // 让 IntentRecognizer 能访问内置工具描述（用于语义匹配）
+            this.baseLLMService.registerToolsForIntent(this.reactAgent.tools);
+
+            // 5. 自动加载内置 skills
             await this.#loadBuiltinSkills();
 
-            // 创建 readline 接口
+            // 6. 创建 readline 接口
             this.rl = readline.createInterface({
                 input,
                 output,
@@ -301,12 +318,14 @@ class CLIAgent {
         const stats = this.baseLLMService.getStats();
         const contextCount = Math.max(0, (stats.messageCount || 1) - 1);
         const refinementStatus = this.baseLLMService.config?.enableRefinement !== false ? 'enabled' : 'disabled';
+        const modeText = this.options.direct ? `${colors.yellow}直接模式${colors.reset}` : `${colors.green}智能路由${colors.reset}`;
         console.log(`
 ${colors.bright}${colors.cyan}🤖 ReAct Agent CLI${colors.reset}
 ${colors.dim}==================${colors.reset}
 ${colors.blue}Provider:${colors.reset} ${this.options.vendor}
 ${colors.blue}Model:${colors.reset}    ${this.options.model}
 ${colors.blue}Skills:${colors.reset}   ${skillCount} loaded
+${colors.blue}Mode:${colors.reset}      ${modeText}
 ${colors.blue}Context:${colors.reset}  ${refinementStatus}
 ${colors.dim}Messages:${colors.reset} ${contextCount} messages
 
@@ -528,8 +547,8 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
             // 创建新的 LLM 客户端
             const llmClient = Models.createModel(vendor, model);
 
-            // 重新创建 ReActAgent（任务执行器）
-            this.reactAgent = new Agent.ReActAgent(vendor, model, this.tools, {
+            // 重新创建 ReActAgent（自动加载内置工具）
+            this.reactAgent = new Agent.ReActAgent(vendor, model, null, {
                 verbose: this.options.verbose,
                 maxIterations: 10
             });
@@ -541,6 +560,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
                 maxMessages: 20,
                 tokenLimit: 1024 * 64,
                 enableRefinement: true,
+                intentMode: 'balanced',
                 language: process.env.PROMPTS_LANG || 'cn'
             });
 
@@ -554,7 +574,8 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
 
             // 重新关联
             this.baseLLMService.setReActAgent(this.reactAgent);
-            this.baseLLMService.registerTools(this.tools);
+            // 重新注册工具到 IntentRecognizer
+            this.baseLLMService.registerToolsForIntent(this.reactAgent.tools);
 
             this.options.vendor = vendor;
             this.options.model = model;
@@ -565,50 +586,91 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
     }
 
     /**
+     * 处理 ReActAgent 事件的回调函数
+     * @param {Object} chunk - 事件数据
+     */
+    #handleAgentEvent(chunk) {
+        switch (chunk.type) {
+            case 'parsed':
+                if (chunk.thought) log.thinking(chunk.thought);
+                break;
+            case 'tool_start':
+                log.tool(`执行: ${chunk.tool}`);
+                this.#logVerbose('参数', chunk.input);
+                break;
+            case 'tool_result':
+                log.result(`完成: ${chunk.tool}`);
+                this.#logVerbose('结果', chunk.result);
+                break;
+            case 'final_answer':
+                console.log();
+                log.answer(chunk.message);
+                console.log();
+                break;
+            case 'error':
+                console.log();
+                log.error(`错误: ${chunk.error}`);
+                console.log(`${colors.dim}提示: 使用 --verbose 查看详细错误信息${colors.reset}`);
+                console.log();
+                break;
+            case 'max_iterations':
+                log.warning(chunk.message);
+                break;
+            // 'start', 'thinking', 'complete' 等事件静默处理
+        }
+    }
+
+    /**
      * 执行对话
      * 新架构：通过 BaseLLMService 处理，支持意图识别和上下文保持
+     * 直接模式：绕过 BaseLLMService，直接使用 ReActAgent
      */
     async chat(query) {
         try {
             console.log(); // 空行
 
+            // 直接模式：绕过 BaseLLMService，直接使用 ReActAgent
+            if (this.options.direct) {
+                this.#logVerbose('模式', '直接模式 (绕过 BaseLLMService)');
+                await this.reactAgent.executeTaskStream({ query }, (chunk) => {
+                    this.#handleAgentEvent(chunk);
+                });
+                return;
+            }
+
             // 使用 BaseLLMService 进行流式对话
             // 新架构流程：
-            // 1. analyzeIntent() - 基于对话历史理解用户意图，完善问题描述
-            // 2. executeTaskStream() - 交给 ReActAgent 全权处理（自主决定是否使用工具）
-            // 3. 上下文管理（所有对话历史都保存在 BaseLLMService 中）
+            // 1. IntentRecognizer - 判断是否需要工具
+            // 2. 问题完善 - 基于对话历史理解用户意图，完善问题描述
+            // 3. 路由决策 - 决定使用 SessionChat 还是 ReActAgent
+            // 4. 上下文管理（所有对话历史都保存在 BaseLLMService 中）
             await this.baseLLMService.streamChat(query, (chunk) => {
+                // 先处理 BaseLLMService 特有事件
                 switch (chunk.type) {
+                    case 'intent_recognized':
+                        // 显示意图识别结果（verbose 模式）
+                        const needsToolsText = chunk.needsTools ? '需要工具' : '直接对话';
+                        const confidenceText = chunk.confidence === 'high' ? '高' : chunk.confidence === 'medium' ? '中' : '低';
+                        this.#logVerbose('意图识别', `${needsToolsText} (${confidenceText}置信度) - ${chunk.reason}`);
+                        if (chunk.suggestedTools && chunk.suggestedTools.length > 0) {
+                            this.#logVerbose('建议工具', chunk.suggestedTools.join(', '));
+                        }
+                        if (chunk.needsRefinement) {
+                            this.#logVerbose('问题完善', `${chunk.originalInput} → ${chunk.refinedQuery}`);
+                        }
+                        break;
+                    case 'routing':
+                        // 显示路由决策（verbose 模式）
+                        this.#logVerbose('路由', `目标: ${chunk.target} (${chunk.reason || chunk.needsTools ? 'needsTools=' + chunk.needsTools : ''})`);
+                        break;
                     case 'intent_refined':
                         // 显示意图理解结果（仅在 verbose 模式）
                         this.#logVerbose('意图理解', `${chunk.original} → ${chunk.refined}`);
                         break;
-                    case 'parsed':
-                        if (chunk.thought) log.thinking(chunk.thought);
+                    default:
+                        // 其他事件委托给通用处理器
+                        this.#handleAgentEvent(chunk);
                         break;
-                    case 'tool_start':
-                        log.tool(`执行: ${chunk.tool}`);
-                        this.#logVerbose('参数', chunk.input);
-                        break;
-                    case 'tool_result':
-                        log.result(`完成: ${chunk.tool}`);
-                        this.#logVerbose('结果', chunk.result);
-                        break;
-                    case 'final_answer':
-                        console.log();
-                        log.answer(chunk.message);
-                        console.log();
-                        break;
-                    case 'error':
-                        console.log();
-                        log.error(`错误: ${chunk.error}`);
-                        console.log(`${colors.dim}提示: 使用 --verbose 查看详细错误信息${colors.reset}`);
-                        console.log();
-                        break;
-                    case 'max_iterations':
-                        log.warning(chunk.message);
-                        break;
-                    // 'start', 'thinking', 'complete' 等事件静默处理
                 }
             });
 

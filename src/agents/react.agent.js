@@ -3,12 +3,17 @@ import {promptFactory} from './utils/prompt.factory.js';
 import {createLogger, serializeResult} from './utils/logger.js';
 import {SkillEngine} from '../skills/skill.engine.js';
 import {SkillManager} from '../skills/skill.manager.js';
+import {getBuiltInTools} from './tools/tool.js';
 
 /**
  * ReactAgent - 实现 ReAct（推理+行动）模式的核心 AI 代理
  *
  * 该代理使用 OpenAI 的 API 将复杂任务分解为推理步骤
  * 并执行外部工具/操作来完成目标。
+ *
+ * 特性：
+ * - 默认自动加载所有内置工具
+ * - 支持自定义工具覆盖
  */
 export class ReActAgent {
     #log;
@@ -17,29 +22,48 @@ export class ReActAgent {
      * 创建一个新的 ReactAgent 实例
      * @param {string} vendorName - 厂商名称
      * @param {string} modelName - 模型名称
-     * @param {Object[]} tools - 可用工具数组
+     * @param {Object[]} [tools] - 可选的自定义工具数组，默认加载所有内置工具
      * @param {Object} config - 配置选项
      * @param {number} [config.maxIterations=5] - 最大推理步骤数
      * @param {string} [config.systemPrompt] - 自定义系统提示
      * @param {boolean} [config.verbose=false] - 启用详细日志
+     * @param {boolean} [config.useBuiltInTools=true] - 是否使用内置工具
      */
-    constructor(vendorName, modelName, tools = [], config = {}) {
+    constructor(vendorName, modelName, tools = null, config = {}) {
         const LLMClient = createModel(vendorName, modelName);
         this.openai = LLMClient.getRawClient();
-        this.tools = tools;
+
+        // 加载工具：优先使用传入的工具，否则使用内置工具
+        const useBuiltIn = config.useBuiltInTools !== false;
+        if (tools && tools.length > 0) {
+            // 使用传入的自定义工具
+            this.tools = tools;
+        } else if (useBuiltIn) {
+            // 自动加载所有内置工具
+            this.tools = getBuiltInTools();
+        } else {
+            this.tools = [];
+        }
+
         this.config = {
             model: modelName,
             maxIterations: 5,
             max_tokens: 1042,
             systemPrompt: null,
             verbose: false,
+            useBuiltInTools: useBuiltIn,
             ...config
         };
         this.conversationHistory = [];
         this.#log = createLogger('ReactAgent', this.config.verbose);
 
+        // 如果有内置工具，打印日志
+        if (useBuiltIn && this.tools.length > 0) {
+            this.#log(`已加载 ${this.tools.length} 个内置工具: ${this.tools.map(t => t.name).join(', ')}`);
+        }
+
         // 初始化技能系统
-        const toolsRegistry = Object.fromEntries(tools.map(t => [t.name, t]));
+        const toolsRegistry = Object.fromEntries(this.tools.map(t => [t.name, t]));
         this.skillEngine = new SkillEngine(toolsRegistry, this.openai, {
             model: this.config.model,
             verbose: this.config.verbose
@@ -602,7 +626,9 @@ export class ReActAgent {
                 }
 
                 this.#log('LLM 流式响应完成:', accumulatedResponse);
+                this.#log('Reasoning 内容:', accumulatedReasoning);
 
+                // 优先使用 content，其次使用 reasoning
                 const contentToParse = accumulatedResponse || accumulatedReasoning || '';
                 const parsed = this.#parseResponse(contentToParse);
 

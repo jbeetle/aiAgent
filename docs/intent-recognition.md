@@ -1,42 +1,77 @@
-# BaseLLMService 意图识别增强
+# BaseLLMService 意图识别与路由
 
 ## 概述
 
-`BaseLLMService` 现在使用增强的 `IntentRecognizer` 模块进行意图识别，提供更智能的工具调用决策能力。
+`BaseLLMService` 整合了 `IntentRecognizer` 模块，实现了完整的意图识别和路由决策功能。新架构清晰分离了不同职责：
+
+- **BaseLLMService**：负责意图识别 + 问题完善 + 路由决策
+- **ReActAgent**：负责执行工具调用
+- **SessionChat**：负责简单对话
+
+## 架构流程
+
+```
+用户输入
+    │
+    ▼
+┌────────────────────────────────────────────┐
+│           BaseLLMService                    │
+│  ┌──────────────────────────────────────┐  │
+│  │ 1. IntentRecognizer.recognize()      │  │
+│  │    - 判断是否需要工具                 │  │
+│  │    - 返回 suggestedTools              │  │
+│  └──────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────┐  │
+│  │ 2. 问题完善（指代消解）               │  │
+│  │    - refinedQuery                    │  │
+│  └──────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────┐  │
+│  │ 3. 路由决策                          │  │
+│  │    - needsTools=true → ReActAgent   │  │
+│  │    - needsTools=false → SessionChat │  │
+│  └──────────────────────────────────────┘  │
+└────────────────────┬───────────────────────┘
+                     │
+                     ▼
+┌────────────────────────────────────────────┐
+│              ReActAgent                      │
+│  - 接收完善后的问题 + 工具列表             │
+│  - 执行 ReAct 循环                         │
+│  - 返回 finalAnswer                        │
+└────────────────────────────────────────────┘
+```
 
 ## 主要改进
 
-### 1. 基于工具描述的动态关键词生成
+### 1. 意图识别 (IntentRecognizer)
 
-- 从每个工具的 `description` 中提取关键词
-- 支持工具名称、描述和参数的语义匹配
-- 自动识别代码、数学、文件处理等模式
+- 基于工具描述的动态关键词生成
+- 语义相似度计算
+- 支持 Skills 的意图识别
+- 可配置的识别策略（激进/保守/平衡）
 
-### 2. 语义相似度计算
+### 2. 问题完善（指代消解）
 
-```javascript
-// 工具相关度计算考虑以下因素：
-// - 工具名称匹配（权重 0.4）
-// - 工具描述匹配（权重最高 0.4）
-// - 参数描述匹配（权重最高 0.2）
-// - 特殊模式匹配（如数学表达式、代码片段）
-```
+- 基于对话历史理解用户真实意图
+- 处理指代消解（"它"指的是什么）
+- 补充省略的上下文
 
-### 3. 支持 Skills 的意图识别
+### 3. 智能路由决策
 
-- 将 Skill 描述纳入意图识别
-- 支持基于技能的意图路由
-- 通过配置启用/禁用
+根据 `needsTools` 和 `confidence` 两个维度决定路由目标：
 
-### 4. 可配置的识别策略
+| needsTools | confidence | 路由目标 | 说明 |
+|-----------|------------|----------|------|
+| true | high | ReActAgent | 明确需要工具，直接执行 |
+| true | medium | ReActAgent | 可能需要工具，交给 Agent 决定 |
+| true | low | ReActAgent | 模糊，但有工具倾向 |
+| false | high | SessionChat | 明确闲聊，直接对话 |
+| false | medium | SessionChat | 可能闲聊，对话为主 |
+| false | low | 根据 intentMode | 模糊情况 |
 
-三种识别模式：
+### 4. 工具预筛选
 
-| 模式 | 说明 | 适用场景 |
-|------|------|----------|
-| `aggressive` | 模糊输入默认使用工具 | 希望最大化工具使用率 |
-| `balanced` | 平衡策略（默认） | 大多数场景 |
-| `conservative` | 只有高置信度才使用工具 | 减少误触发 |
+根据意图识别结果的 `suggestedTools` 预筛选工具，减少不必要的工具传递。
 
 ## 配置选项
 
@@ -52,61 +87,19 @@ const service = new Models.BaseLLMService(llmClient, {
     verbose: false,
 
     // 意图识别配置
-    intentRecognition: {
-        mode: 'balanced',                    // 'aggressive' | 'conservative' | 'balanced'
-        useToolDescriptions: true,           // 是否使用工具描述
-        useSkillDescriptions: true,          // 是否使用 Skill 描述
-        llmConfirmationThreshold: 'medium',  // LLM 确认阈值: 'low' | 'medium' | 'high'
-        enableSemanticMatching: true,        // 是否启用语义匹配
-        minToolRelevanceScore: 0.3,          // 最小工具相关度分数
-        maxToolsInPrompt: 10                 // 提示词中包含的最大工具数量
-    }
+    intentMode: 'balanced',           // 'aggressive' | 'conservative' | 'balanced'
+    enableToolFiltering: true,        // 是否启用工具预筛选
+    enableRefinement: true            // 是否启用问题完善（指代消解）
 });
 ```
 
-### 运行时更新配置
+### 模式说明
 
-```javascript
-// 更新意图识别配置
-service.updateIntentRecognitionConfig({
-    mode: 'aggressive',
-    useToolDescriptions: true
-});
-
-// 快速切换模式
-service.setIntentRecognitionMode('conservative');
-
-// 获取当前配置
-const config = service.getIntentRecognitionConfig();
-```
-
-## 意图识别流程
-
-```
-用户输入
-    ↓
-[阶段1: 快速关键词匹配]
-    ↓
-高置信度匹配 ──→ 直接决策 (needsTools: true/false)
-    ↓
-低置信度/无匹配
-    ↓
-[阶段2: 语义匹配]（如果启用）
-    ↓
-计算工具相关度分数
-    ↓
-高相关度 ──→ 需要工具
-    ↓
-中低相关度
-    ↓
-[阶段3: LLM 确认]（根据阈值）
-    ↓
-构建详细提示词（含工具描述、Skill 描述）
-    ↓
-LLM 分析
-    ↓
-决策结果
-```
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| `aggressive` | 模糊输入默认使用工具 | 希望最大化工具使用率 |
+| `balanced` | 平衡策略（默认） | 大多数场景 |
+| `conservative` | 只有高置信度才使用工具 | 减少误触发 |
 
 ## 识别结果
 
@@ -116,17 +109,53 @@ LLM 分析
 {
     needsTools: true/false,              // 是否需要使用工具
     confidence: 'high'/'medium'/'low',   // 置信度
-    reason: 'math_calculation',          // 判断理由
-    suggestedTools: ['calculator'],      // 建议的工具列表
+    reason: 'time_query',               // 判断理由
+    suggestedTools: ['get_current_time'], // 建议的工具列表
     toolAnalysis: [                      // 工具分析详情
         {
-            tool: 'calculator',
+            tool: 'get_current_time',
             relevance: 0.85,
-            reason: 'name_match: calc'
+            reason: 'name_match: time'
         }
     ],
-    intentSummary: '用户想要计算...'      // 意图摘要（LLM 确认时）
+    refinedQuery: '现在是几点',          // 完善后的问题
+    needsRefinement: false,             // 是否进行了完善
+    originalInput: '现在是几点'         // 原始输入
 }
+```
+
+## 路由事件
+
+流式响应会发送以下新事件类型：
+
+### intent_recognized
+
+```javascript
+onChunk({
+    type: 'intent_recognized',
+    needsTools: true,
+    confidence: 'high',
+    reason: 'time_query',
+    suggestedTools: ['get_current_time'],
+    needsRefinement: false,
+    originalInput: '现在是几点',
+    refinedQuery: '现在是几点',
+    timestamp: '2024-01-01T00:00:00.000Z'
+});
+```
+
+### routing
+
+```javascript
+onChunk({
+    type: 'routing',
+    needsTools: true,
+    confidence: 'high',
+    mode: 'balanced',
+    target: 'reactAgent',
+    reason: 'needsTools=true',
+    timestamp: '2024-01-01T00:00:00.000Z'
+});
 ```
 
 ## 使用示例
@@ -139,81 +168,65 @@ import { Models, Tools } from 'react-agent-framework';
 // 创建 LLM 客户端
 const llmClient = Models.createModel('DeepSeek', 'deepseek-chat');
 
+// 创建 ReActAgent
+const reactAgent = new Agent.ReActAgent('DeepSeek', 'deepseek-chat', []);
+
 // 创建 BaseLLMService
 const service = new Models.BaseLLMService(llmClient, {
-    intentRecognition: {
-        mode: 'balanced',
-        useToolDescriptions: true
-    }
+    intentMode: 'balanced',
+    enableToolFiltering: true,
+    enableRefinement: true,
+    verbose: true
 });
 
 // 注册工具
 const tools = Tools.getBuiltInTools();
 service.registerTools(tools);
+service.setReActAgent(reactAgent);
 
-// 对话
-const result = await service.chat('帮我计算 25 乘以 4');
-console.log(result);
-// {
-//     success: true,
-//     answer: '25 乘以 4 等于 100',
-//     type: 'tool_execution',
-//     intent: { needsTools: true, confidence: 'high', ... }
-// }
+// 对话 - 自动路由
+const result = await service.chat('现在是几点');
+// result.type === 'execution' → ReActAgent 处理
+// result.type === 'direct' → SessionChat 处理
 ```
 
-### 使用 IntentRecognizer 直接
+### 流式对话
 
 ```javascript
-import { Models } from 'react-agent-framework';
-
-const recognizer = new Models.IntentRecognizer(llmClient, 'model-name', {
-    mode: 'aggressive',
-    minToolRelevanceScore: 0.5
+await service.streamChat('25*4等于多少', (chunk) => {
+    switch (chunk.type) {
+        case 'intent_recognized':
+            console.log('意图识别:', chunk.needsTools, chunk.confidence);
+            break;
+        case 'routing':
+            console.log('路由决策:', chunk.target, chunk.reason);
+            break;
+        case 'intent_refined':
+            console.log('问题完善:', chunk.original, '→', chunk.refined);
+            break;
+        case 'tool_start':
+            console.log('执行工具:', chunk.tool);
+            break;
+        case 'final_answer':
+            console.log('最终答案:', chunk.message);
+            break;
+    }
 });
-
-// 注册工具
-recognizer.registerTools(tools);
-
-// 识别意图
-const result = await recognizer.recognize('帮我生成一段代码');
-console.log(result);
 ```
 
-### 不同模式的对比
+## 时间查询优化
 
-```javascript
-// 激进模式 - 最大化工具使用
-service.setIntentRecognitionMode('aggressive');
-await service.chat('帮我看看这个'); // 可能触发工具调用
+时间查询现在被正确识别为需要工具的场景：
 
-// 保守模式 - 减少误触发
-service.setIntentRecognitionMode('conservative');
-await service.chat('你好'); // 不会触发工具调用
-
-// 平衡模式（默认）
-service.setIntentRecognitionMode('balanced');
-```
-
-## 回退策略
-
-当意图识别系统出现问题时：
-
-1. **禁用意图识别**：所有输入都交给 ReActAgent 处理
-   ```javascript
-   const service = new Models.BaseLLMService(llmClient, {
-       useIntentRecognition: false
-   });
-   ```
-
-2. **失败时默认行为**：
-   - `aggressive` 模式：默认使用工具
-   - `conservative` 模式：默认不使用工具
-   - `balanced` 模式：交给 ReActAgent 决定
+| 用户输入 | 识别结果 | 路由目标 |
+|----------|----------|----------|
+| "现在是几点" | needsTools: true, time_query | ReActAgent |
+| "今天是几号" | needsTools: true, time_query | ReActAgent |
+| "几点了" | needsTools: true, time_query | ReActAgent |
 
 ## 调试和日志
 
-启用详细日志查看意图识别过程：
+启用详细日志查看完整流程：
 
 ```javascript
 const service = new Models.BaseLLMService(llmClient, {
@@ -223,22 +236,24 @@ const service = new Models.BaseLLMService(llmClient, {
 
 日志输出示例：
 ```
-[IntentRecognizer] 开始意图识别: 帮我计算 25 乘以 4
-[IntentRecognizer] 高置信度关键词匹配: { needsTools: true, confidence: 'high', ... }
-[BaseLLMService] 意图识别结果: { ... }
+[IntentRecognizer] 开始意图识别: 25*4等于多少
+[IntentRecognizer] 高置信度关键词匹配: { needsTools: true, confidence: 'high', reason: 'math_question', ... }
+[BaseLLMService] 路由决策: needsTools=true, confidence=high, mode=balanced
+[BaseLLMService] 路由: ReActAgent (needsTools=true)
 ```
 
-## 性能优化建议
+## 获取统计信息
 
-1. **减少 LLM 调用**：提高 `llmConfirmationThreshold` 到 `'high'`，只在必要时使用 LLM 确认
-2. **限制工具数量**：减小 `maxToolsInPrompt` 以减少提示词长度
-3. **禁用语义匹配**：设置 `enableSemanticMatching: false` 以跳过语义分析
-4. **使用关键词匹配**：对于确定性场景，可以设置 `mode: 'aggressive'` 并禁用 LLM 确认
-
-## 测试
-
-运行意图识别测试：
-
-```bash
-node examples/test-intent-recognition.js
+```javascript
+const stats = service.getStats();
+// {
+//     messagesCount: 10,
+//     tokensUsed: 1500,
+//     toolsCount: 5,
+//     skillsCount: 3,
+//     hasReActAgent: true,
+//     intentMode: 'balanced',
+//     enableToolFiltering: true,
+//     enableRefinement: true
+// }
 ```
