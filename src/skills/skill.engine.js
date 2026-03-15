@@ -13,6 +13,10 @@ export class SkillEngine {
   #log;
   #maxExecutionDepth = 10; // 防止无限递归
 
+  // 预编译变量替换正则，避免每次重新编译
+  static #VARIABLE_REGEX = /\{\{(parameters|steps|outputs|env)\.([\w.]+)\}\}/g;
+  static #STEPS_OUTPUT_REGEX = /^(\w+)\.output(?:\.(.*))?$/;
+
   /**
    * 创建技能执行引擎
    * @param {Object} toolsRegistry - 工具注册表 { name: tool }
@@ -374,36 +378,65 @@ export class SkillEngine {
 
   /**
    * 解析字符串中的变量
+   * 使用单次遍历替换所有变量类型，避免多次正则扫描和中间字符串创建
    * @param {string} template - 模板字符串
    * @param {Object} context - 执行上下文
    * @returns {string} - 替换后的字符串
    */
   #resolveStringVariables(template, context) {
-    return template
-      // {{parameters.xxx}} 或 {{parameters.xxx.yyy}}
-      .replace(/\{\{parameters\.([\w.]+)\}\}/g, (match, key) => {
-        const value = this.#getNestedValue(context.parameters, key);
-        return value !== undefined ? value : match;
-      })
-      // {{steps.xxx.output}} 或 {{steps.xxx.output.yyy}}
-      .replace(/\{\{steps\.(\w+)\.output(?:\.([\w.]+))?\}\}/g, (match, stepKey, nestedPath) => {
-        const step = context.steps[stepKey];
-        if (!step || step.output === undefined) return match;
-        if (nestedPath) {
-          const value = this.#getNestedValue(step.output, nestedPath);
-          return value !== undefined ? value : match;
-        }
-        return step.output;
-      })
-      // {{outputs.xxx}} 或 {{outputs.xxx.yyy}}
-      .replace(/\{\{outputs\.([\w.]+)\}\}/g, (match, key) => {
-        const value = this.#getNestedValue(context.outputs, key);
-        return value !== undefined ? value : match;
-      })
-      // {{env.xxx}}
-      .replace(/\{\{env\.(\w+)\}\}/g, (match, key) => {
-        return process.env[key] !== undefined ? process.env[key] : match;
-      });
+    return template.replace(SkillEngine.#VARIABLE_REGEX, (match, namespace, path) => {
+      const value = this.#resolveVariableValue(namespace, path, context);
+      return value !== undefined ? value : match;
+    });
+  }
+
+  /**
+   * 根据命名空间和路径解析变量值
+   * @param {string} namespace - 命名空间 (parameters, steps, outputs, env)
+   * @param {string} path - 路径
+   * @param {Object} context - 执行上下文
+   * @returns {any} - 解析后的值
+   */
+  #resolveVariableValue(namespace, path, context) {
+    switch (namespace) {
+      case 'parameters':
+        return this.#getNestedValue(context.parameters, path);
+
+      case 'steps':
+        // steps.xxx.output 或 steps.xxx.output.yyy 格式
+        return this.#resolveStepsVariable(path, context);
+
+      case 'outputs':
+        return this.#getNestedValue(context.outputs, path);
+
+      case 'env':
+        // env 变量通常不需要嵌套访问，直接返回
+        return process.env[path];
+
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * 解析 steps 命名空间的变量
+   * steps.xxx.output 或 steps.xxx.output.yyy
+   * @param {string} path - 路径 (如 "read_code.output" 或 "read_code.output.content")
+   * @param {Object} context - 执行上下文
+   * @returns {any} - 解析后的值
+   */
+  #resolveStepsVariable(path, context) {
+    const match = path.match(SkillEngine.#STEPS_OUTPUT_REGEX);
+    if (!match) return undefined;
+
+    const [, stepKey, nestedPath] = match;
+    const step = context.steps[stepKey];
+    if (!step || step.output === undefined) return undefined;
+
+    if (nestedPath) {
+      return this.#getNestedValue(step.output, nestedPath);
+    }
+    return step.output;
   }
 
   /**
