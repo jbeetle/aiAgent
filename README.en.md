@@ -2153,7 +2153,7 @@ project/
 │   │   │   └── chat.session.js  # Smart conversation session management (supports context compression and token optimization)
 │   │   ├── tools/               # Tool system
 │   │   │   ├── calculator.js    # Calculator tool implementation
-│   │   │   ├── code-executor.js # Code execution tool (Node.js/Python)
+│   │   │   ├── code.executor.js # Code execution tool (Node.js/Python)
 │   │   │   └── tool.js          # Tool system core
 │   │   ├── utils/               # Utility functions
 │   │   │   ├── prompt.factory.js # Prompt factory

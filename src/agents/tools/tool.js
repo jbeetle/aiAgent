@@ -4,15 +4,15 @@
 
 // 导入内置工具
 import {advancedCalculatorTool, calculatorTool, getCurrentTimeTool, randomNumberTool} from './calculator.js';
-import {fileReaderTool, fileWriterTool} from './filesystem.js';
-import {scriptTool, shellInfoTool} from './script.js';
-import {codeExecutorTool, codeGeneratorTool} from './code-executor.js';
+import {fileReaderTool, fileWriterTool} from './file.system.js';
+import {scriptTool, shellInfoTool} from './shell.script.js';
+import {codeExecutorTool, codeGeneratorTool} from './code.executor.js';
 
 // 重新导出工具以供外部使用
 export {calculatorTool, randomNumberTool, advancedCalculatorTool, getCurrentTimeTool} from './calculator.js';
-export {fileReaderTool, fileWriterTool} from './filesystem.js';
-export {scriptTool, shellInfoTool} from './script.js';
-export {codeExecutorTool, codeGeneratorTool} from './code-executor.js';
+export {fileReaderTool, fileWriterTool} from './file.system.js';
+export {scriptTool, shellInfoTool} from './shell.script.js';
+export {codeExecutorTool, codeGeneratorTool} from './code.executor.js';
 
 /**
  * 获取所有内置工具数组

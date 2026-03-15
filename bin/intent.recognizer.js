@@ -1,4 +1,4 @@
-import {createLogger} from './logger.js';
+import {createLogger} from '../src/agents/utils/logger.js';
 
 /**
  * IntentRecognitionConfig - 意图识别配置

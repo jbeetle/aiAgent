@@ -6,7 +6,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import {fileURLToPath} from 'url';
-import {validateSkill, detectSkillType, SkillType, convertToExecutableSkill} from './skill.schema.js';
+import {convertToExecutableSkill, detectSkillType, SkillType, validateSkill} from './skill.schema.js';
 import {createLogger} from '../agents/utils/logger.js';
 
 /**
