@@ -16,6 +16,9 @@ import {fileURLToPath} from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// 常量定义
+const DEFAULT_MAX_ITERATIONS = 15;
+
 // ANSI 颜色代码
 const colors = {
     reset: '\x1b[0m',
@@ -42,6 +45,9 @@ const log = {
     answer: (msg) => console.log(`${colors.bright}${colors.white}📊${colors.reset} ${colors.bright}${msg}${colors.reset}`),
     skill: (msg) => console.log(`${colors.magenta}📦${colors.reset} ${msg}`)
 };
+
+// CLI 提示符常量
+const CLI_PROMPT = `${colors.cyan}>${colors.reset} `;
 
 /**
  * 解析命令行参数
@@ -135,7 +141,7 @@ class CLIAgent {
                 this.tools,
                 {
                     verbose: this.options.verbose,
-                    maxIterations: 15
+                    maxIterations: DEFAULT_MAX_ITERATIONS
                 }
             );
 
@@ -156,7 +162,7 @@ class CLIAgent {
             this.rl = readline.createInterface({
                 input,
                 output,
-                prompt: `${colors.cyan}>${colors.reset} `
+                prompt: CLI_PROMPT
             });
 
             // 如果指定了 skills 目录，加载它
@@ -182,6 +188,17 @@ class CLIAgent {
     }
 
     /**
+     * 打印详细日志（仅在 verbose 模式下）
+     * @param {string} label - 标签
+     * @param {any} data - 数据
+     */
+    #logVerbose(label, data) {
+        if (!this.options.verbose || data == null) return;
+        const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+        console.log(`${colors.dim}  ${label}: ${dataStr.substring(0, 200)}${dataStr.length > 200 ? '...' : ''}${colors.reset}`);
+    }
+
+    /**
      * 启动 CLI
      */
     async start() {
@@ -193,7 +210,7 @@ class CLIAgent {
         this.printBanner();
 
         while (this.running) {
-            const input = await this.rl.question(`${colors.cyan}>${colors.reset} `);
+            const input = await this.rl.question(CLI_PROMPT);
             const trimmed = input.trim();
 
             if (!trimmed) continue;
@@ -616,31 +633,16 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
             // 4. 上下文管理（所有对话历史都保存在 BaseLLMService 中）
             await this.baseLLMService.streamChat(query, (chunk) => {
                 switch (chunk.type) {
-                    case 'start':
-                        // 静默开始
-                        break;
-                    case 'thinking':
-                        // 思考过程不显示，保持界面简洁
-                        break;
                     case 'parsed':
-                        if (chunk.thought) {
-                            log.thinking(chunk.thought);
-                        }
+                        if (chunk.thought) log.thinking(chunk.thought);
                         break;
                     case 'tool_start':
                         log.tool(`执行: ${chunk.tool}`);
-                        if (this.options.verbose && chunk.input) {
-                            console.log(`${colors.dim}  参数: ${JSON.stringify(chunk.input)}${colors.reset}`);
-                        }
+                        this.#logVerbose('参数', chunk.input);
                         break;
                     case 'tool_result':
                         log.result(`完成: ${chunk.tool}`);
-                        if (this.options.verbose && chunk.result) {
-                            const resultStr = typeof chunk.result === 'string'
-                                ? chunk.result
-                                : JSON.stringify(chunk.result);
-                            console.log(`${colors.dim}  结果: ${resultStr.substring(0, 200)}${resultStr.length > 200 ? '...' : ''}${colors.reset}`);
-                        }
+                        this.#logVerbose('结果', chunk.result);
                         break;
                     case 'final_answer':
                         console.log();
@@ -656,9 +658,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
                     case 'max_iterations':
                         log.warning(chunk.message);
                         break;
-                    case 'complete':
-                        // 对话完成，上下文已自动保存
-                        break;
+                    // 'start', 'thinking', 'complete' 等事件静默处理
                 }
             });
 
