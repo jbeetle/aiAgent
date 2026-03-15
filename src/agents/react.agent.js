@@ -33,17 +33,17 @@ export class ReActAgent {
         const LLMClient = createModel(vendorName, modelName);
         this.openai = LLMClient.getRawClient();
 
-        // 加载工具：优先使用传入的工具，否则使用内置工具
+        // 加载工具：自定义工具和内置工具可以叠加
         const useBuiltIn = config.useBuiltInTools !== false;
-        if (tools && tools.length > 0) {
-            // 使用传入的自定义工具
-            this.tools = tools;
-        } else if (useBuiltIn) {
-            // 自动加载所有内置工具
-            this.tools = getBuiltInTools();
-        } else {
-            this.tools = [];
+        const customTools = tools && tools.length > 0 ? tools : [];
+        const builtInTools = useBuiltIn ? getBuiltInTools() : [];
+
+        // 合并工具：自定义工具优先，同名时覆盖内置工具
+        const toolMap = new Map();
+        for (const tool of [...builtInTools, ...customTools]) {
+            toolMap.set(tool.name, tool);
         }
+        this.tools = Array.from(toolMap.values());
 
         this.config = {
             model: modelName,

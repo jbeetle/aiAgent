@@ -54,6 +54,7 @@ const CLI_PROMPT = `${colors.cyan}>${colors.reset} `;
  */
 function parseArgs() {
     const args = process.argv.slice(2);
+    //console.log(args);
     const options = {
         vendor: 'DeepSeek',
         model: 'deepseek-chat',
@@ -64,6 +65,7 @@ function parseArgs() {
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
+        //console.log(arg);
         switch (arg) {
             case '--vendor':
             case '-v':
@@ -155,6 +157,7 @@ class CLIAgent {
                 null, // 不传工具，让 ReActAgent 自动加载内置工具
                 {
                     verbose: this.options.verbose,
+                    useBuiltInTools:true,
                     maxIterations: DEFAULT_MAX_ITERATIONS
                 }
             );
@@ -637,7 +640,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
                 });
                 return;
             }
-
+            //console.log(query);
             // 使用 BaseLLMService 进行流式对话
             // 新架构流程：
             // 1. IntentRecognizer - 判断是否需要工具
@@ -646,6 +649,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
             // 4. 上下文管理（所有对话历史都保存在 BaseLLMService 中）
             await this.baseLLMService.streamChat(query, (chunk) => {
                 // 先处理 BaseLLMService 特有事件
+                console.log(chunk);
                 switch (chunk.type) {
                     case 'intent_recognized':
                         // 显示意图识别结果（verbose 模式）
@@ -685,6 +689,7 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
  */
 async function main() {
     const options = parseArgs();
+    console.log(options);
     const cli = new CLIAgent(options);
     await cli.start();
 }
