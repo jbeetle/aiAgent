@@ -150,7 +150,7 @@ class CLIAgent {
                 verbose: this.options.verbose,
                 maxMessages: 20,
                 tokenLimit: 1024 * 64,
-                useIntentRecognition: true,
+                enableRefinement: true,
                 language: process.env.PROMPTS_LANG || 'cn'
             });
 
@@ -300,14 +300,14 @@ class CLIAgent {
         const skillCount = this.reactAgent.getSkillSummaries().length;
         const stats = this.baseLLMService.getStats();
         const contextCount = Math.max(0, (stats.messageCount || 1) - 1);
-        const refinementEnabled = this.baseLLMService.config.enableRefinement;
+        const refinementStatus = this.baseLLMService.config?.enableRefinement !== false ? 'enabled' : 'disabled';
         console.log(`
 ${colors.bright}${colors.cyan}🤖 ReAct Agent CLI${colors.reset}
 ${colors.dim}==================${colors.reset}
 ${colors.blue}Provider:${colors.reset} ${this.options.vendor}
 ${colors.blue}Model:${colors.reset}    ${this.options.model}
 ${colors.blue}Skills:${colors.reset}   ${skillCount} loaded
-${colors.blue}Context:${colors.reset}  ${refinementEnabled ? 'enabled' : 'disabled'}
+${colors.blue}Context:${colors.reset}  ${refinementStatus}
 ${colors.dim}Messages:${colors.reset} ${contextCount} messages
 
 ${colors.dim}Type /help for commands or start chatting!${colors.reset}
