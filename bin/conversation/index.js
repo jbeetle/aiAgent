@@ -4,4 +4,4 @@
  */
 
 export { BaseLLMService } from './base.llm.service.js';
-export { IntentRecognizer } from '../utils/intent.recognizer.js';
+export { IntentRecognizer } from '../intent.recognizer.js';

@@ -2153,7 +2153,7 @@ project/
 │   │   │   └── chat.session.js  # 智能对话会话管理（支持上下文压缩和Token优化）
 │   │   ├── tools/               # 工具系统
 │   │   │   ├── calculator.js    # 计算器工具实现
-│   │   │   ├── code-executor.js # 代码执行工具（Node.js/Python）
+│   │   │   ├── code.executor.js # 代码执行工具（Node.js/Python）
 │   │   │   └── tool.js          # 工具系统核心
 │   │   ├── utils/               # 工具函数
 │   │   │   ├── prompt.factory.js # 提示词工厂

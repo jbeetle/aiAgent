@@ -1,5 +1,5 @@
-import {SessionChat} from '../models/chat.session.js';
-import {createLogger} from '../utils/logger.js';
+import {SessionChat} from '../../src/agents/models/chat.session.js';
+import {createLogger} from '../../src/agents/utils/logger.js';
 
 /**
  * BaseLLMService - 基础 LLM 对话服务层

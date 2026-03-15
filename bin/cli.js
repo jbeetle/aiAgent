@@ -6,7 +6,7 @@
  */
 
 import {Agent, Models, Tools} from '../src/index.js';
-import {BaseLLMService} from '../src/agents/conversation/index.js';
+import {BaseLLMService} from './conversation/index.js';
 import readline from 'node:readline/promises';
 import {stdin as input, stdout as output} from 'node:process';
 import path from 'path';

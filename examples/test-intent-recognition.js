@@ -3,7 +3,7 @@
  * 测试增强的意图识别系统
  */
 
-import {IntentRecognizer} from '../src/agents/utils/intent.recognizer.js';
+import {IntentRecognizer} from '../bin/intent.recognizer.js';
 import {getBuiltInTools} from '../src/agents/tools/tool.js';
 
 // 模拟 LLM 客户端

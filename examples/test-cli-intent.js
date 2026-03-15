@@ -6,7 +6,7 @@
  */
 
 import {Agent, Models, Tools} from '../src/index.js';
-import {BaseLLMService} from '../src/agents/conversation/index.js';
+import {BaseLLMService} from '../bin/conversation/index.js';
 import dotenv from 'dotenv';
 
 // 加载环境变量
@@ -123,7 +123,7 @@ async function runTest() {
                 const intent = await baseLLMService.getIntentRecognitionConfig();
 
                 // 使用 IntentRecognizer 直接测试
-                const { IntentRecognizer } = await import('../src/agents/conversation/index.js');
+                const { IntentRecognizer } = await import('../bin/conversation/index.js');
                 const recognizer = new IntentRecognizer(llmClient, 'deepseek-chat', {
                     mode: mode,
                     useToolDescriptions: true,
