@@ -1,6 +1,5 @@
 import {SessionChat} from '../models/chat.session.js';
 import {createLogger} from '../utils/logger.js';
-import {IntentRecognizer} from '../utils/intent.recognizer.js';
 
 /**
  * BaseLLMService - 基础 LLM 对话服务层
@@ -20,8 +19,6 @@ export class BaseLLMService {
     #tools = [];
     #skills = [];
 
-    #intentRecognizer = null;
-
     /**
      * 创建 BaseLLMService 实例
      * @param {Object} llmClient - LLM 客户端实例 (如 LLMClient)
@@ -30,10 +27,8 @@ export class BaseLLMService {
      * @param {number} [config.maxMessages=20] - 最大消息数量
      * @param {number} [config.tokenLimit=65536] - token 限制
      * @param {boolean} [config.verbose=false] - 启用详细日志
-     * @param {boolean} [config.useIntentRecognition=true] - 是否使用意图理解（用于多轮对话的指代消解）
-     * @param {string} [config.language] - 语言 ('cn' | 'en')
-     * @param {Object} [config.intentRecognition] - 意图理解配置（保留配置兼容性）
      * @param {boolean} [config.enableRefinement=true] - 是否启用问题完善（指代消解、省略补充）
+     * @param {string} [config.language] - 语言 ('cn' | 'en')
      */
     constructor(llmClient, config = {}) {
         this.config = {
@@ -42,19 +37,8 @@ export class BaseLLMService {
             compressThreshold: 15,
             verbose: false,
             systemPrompt: null,
-            useIntentRecognition: true,
             enableRefinement: true,  // 是否启用问题完善
             language: process.env.PROMPTS_LANG || 'cn',
-            intentRecognition: {
-                mode: 'balanced',
-                useToolDescriptions: true,
-                useSkillDescriptions: true,
-                llmConfirmationThreshold: 'medium',
-                enableSemanticMatching: true,
-                minToolRelevanceScore: 0.3,
-                maxToolsInPrompt: 10,
-                ...config.intentRecognition
-            },
             ...config
         };
 
@@ -70,16 +54,6 @@ export class BaseLLMService {
             compressThreshold: this.config.compressThreshold,
             verbose: this.config.verbose
         });
-
-        // 创建 IntentRecognizer
-        if (this.config.useIntentRecognition) {
-            this.#intentRecognizer = new IntentRecognizer(
-                llmClient,
-                llmClient.model,
-                this.config.intentRecognition,
-                this.config.verbose
-            );
-        }
 
         this.#log('BaseLLMService 初始化完成');
     }
@@ -100,11 +74,6 @@ export class BaseLLMService {
     registerTools(tools) {
         this.#tools = tools || [];
         this.#log(`已注册 ${this.#tools.length} 个工具`);
-
-        // 同时注册到 IntentRecognizer
-        if (this.#intentRecognizer) {
-            this.#intentRecognizer.registerTools(tools);
-        }
     }
 
     /**
@@ -114,17 +83,11 @@ export class BaseLLMService {
     registerSkills(skills) {
         this.#skills = skills || [];
         this.#log(`已注册 ${this.#skills.length} 个技能`);
-
-        // 同时注册到 IntentRecognizer
-        if (this.#intentRecognizer) {
-            this.#intentRecognizer.registerSkills(skills);
-        }
     }
 
     /**
      * 主入口：对话处理
-     * 新架构：始终交给 ReActAgent 处理（让 ReActAgent 自主决定是否使用工具）
-     * BaseLLMService 负责基于对话历史完善问题描述
+     * 新架构：简单查询直接由 SessionChat 处理，复杂查询交给 ReActAgent
      *
      * @param {string} input - 用户输入
      * @returns {Promise<Object>} - 响应结果
@@ -132,6 +95,17 @@ export class BaseLLMService {
     async chat(input) {
         try {
             this.#log('处理用户输入:', input);
+
+            // 快速路径：简单问候语直接由 SessionChat 处理
+            if (this.#isSimpleGreeting(input)) {
+                this.#log('检测到简单问候，直接响应');
+                const response = await this.sessionChat.chat(input);
+                return {
+                    success: true,
+                    answer: response,
+                    type: 'direct'
+                };
+            }
 
             // 1. 基于对话历史理解用户意图，完善问题描述
             const analysis = await this.analyzeIntent(input);
@@ -150,9 +124,29 @@ export class BaseLLMService {
     }
 
     /**
+     * 判断是否为简单问候语（可直接由 SessionChat 处理）
+     * @private
+     */
+    #isSimpleGreeting(input) {
+        const simplePatterns = [
+            // 问候语
+            /^(你好|您好|嗨|hello|hi|hey)[!！.]?$/i,
+            // 询问身份
+            /^(你是谁|你叫什么|what's your name|who are you)[?？]?$/i,
+            // 感谢
+            /^(谢谢|感谢|thanks|thank you)[!！.]?$/i,
+            // 告别
+            /^(再见|拜拜|bye|goodbye)[!！.]?$/i,
+            // 简单确认
+            /^(好的|ok|okay|yes|no)[!！.]?$/i
+        ];
+
+        return simplePatterns.some(pattern => pattern.test(input.trim()));
+    }
+
+    /**
      * 流式对话处理
-     * 新架构：始终交给 ReActAgent 处理（让 ReActAgent 自主决定是否使用工具）
-     * BaseLLMService 负责基于对话历史完善问题描述
+     * 新架构：简单查询直接由 SessionChat 处理，复杂查询交给 ReActAgent
      *
      * @param {string} input - 用户输入
      * @param {Function} onChunk - 流式回调函数
@@ -161,6 +155,12 @@ export class BaseLLMService {
     async streamChat(input, onChunk = null) {
         try {
             this.#log('开始流式处理:', input);
+
+            // 快速路径：简单问候语直接由 SessionChat 处理
+            if (this.#isSimpleGreeting(input)) {
+                this.#log('检测到简单问候，直接响应');
+                return await this.#streamDirectChat(input, onChunk);
+            }
 
             // 1. 基于对话历史理解用户意图，完善问题描述
             const analysis = await this.analyzeIntent(input);
@@ -372,21 +372,6 @@ Return only the refined question, no explanations.`;
     }
 
     /**
-     * 意图识别（保留向后兼容）
-     * @private
-     * @deprecated 新架构中不再使用二元意图判断，使用 analyzeIntent 替代
-     */
-    async #analyzeIntent(input) {
-        // 如果没有启用意图识别或没有工具，直接返回不需要工具
-        if (!this.config.useIntentRecognition || !this.#intentRecognizer || this.#tools.length === 0) {
-            return { needsTools: false, confidence: 'high', reason: 'no_tools_available' };
-        }
-
-        // 使用 IntentRecognizer 进行意图识别
-        return await this.#intentRecognizer.recognize(input);
-    }
-
-    /**
      * 使用工具执行任务（非流式）
      * @private
      */
@@ -489,6 +474,51 @@ Return only the refined question, no explanations.`;
     }
 
     /**
+     * 直接流式对话（用于简单问候语的快速路径）
+     * @private
+     */
+    async #streamDirectChat(input, onChunk) {
+        let finalContent = '';
+
+        await this.sessionChat.streamChat(
+            input,
+            (chunk, isReasoning, isDone) => {
+                if (isDone) {
+                    finalContent = chunk;
+                    if (onChunk) {
+                        onChunk({
+                            type: 'final_answer',
+                            message: finalContent,
+                            timestamp: new Date().toISOString()
+                        });
+                        onChunk({
+                            type: 'complete',
+                            result: { success: true, answer: finalContent },
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                } else {
+                    if (!isReasoning && onChunk) {
+                        onChunk({
+                            type: 'thinking',
+                            content: chunk,
+                            accumulated: finalContent,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                    finalContent += chunk;
+                }
+            }
+        );
+
+        return {
+            success: true,
+            answer: finalContent,
+            type: 'direct'
+        };
+    }
+
+    /**
      * 创建系统提示
      * @private
      */
@@ -551,41 +581,6 @@ Please be friendly, professional, and provide accurate and useful information.`;
         return this.sessionChat.getTokenStatus();
     }
 
-    /**
-     * 获取意图识别配置
-     * @returns {Object} - 意图识别配置
-     */
-    getIntentRecognitionConfig() {
-        return this.#intentRecognizer ? this.#intentRecognizer.getConfig() : null;
-    }
-
-    /**
-     * 更新意图识别配置
-     * @param {Object} config - 新的配置选项
-     * @param {string} [config.mode] - 识别模式: 'aggressive' | 'conservative' | 'balanced'
-     * @param {boolean} [config.useToolDescriptions] - 是否使用工具描述
-     * @param {boolean} [config.useSkillDescriptions] - 是否使用 Skill 描述
-     * @param {string} [config.llmConfirmationThreshold] - LLM 确认阈值: 'low' | 'medium' | 'high'
-     * @param {boolean} [config.enableSemanticMatching] - 是否启用语义匹配
-     * @param {number} [config.minToolRelevanceScore] - 最小工具相关度分数
-     * @param {number} [config.maxToolsInPrompt] - 提示词中包含的最大工具数量
-     */
-    updateIntentRecognitionConfig(config) {
-        if (this.#intentRecognizer) {
-            this.#intentRecognizer.updateConfig(config);
-            this.#log('意图识别配置已更新:', config);
-        } else {
-            this.#log('警告: IntentRecognizer 未初始化，无法更新配置');
-        }
-    }
-
-    /**
-     * 设置意图识别模式
-     * @param {string} mode - 'aggressive' | 'conservative' | 'balanced'
-     */
-    setIntentRecognitionMode(mode) {
-        this.updateIntentRecognitionConfig({ mode });
-    }
 }
 
 export default BaseLLMService;
