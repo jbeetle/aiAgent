@@ -491,18 +491,28 @@ export class IntentRecognizer {
             return `请分析以下用户输入，判断是否需要调用工具或技能来完成。
 
 重要提示：
-- 简单对话、闲聊、问候、询问时间/日期等日常问题，直接用语言回答即可，不需要调用工具
-- 只有当用户明确要求执行特定任务（如计算、文件操作、代码执行、数据分析等）时才需要工具
-- 如果用户只是询问信息或聊天，needs_tools 应该为 false
+**不需要工具的情况（needs_tools = false）：**
+- 问候语：你好、再见、谢谢等
+- 询问个人信息：你叫什么名字、你会做什么
+- 询问当前时间/日期：现在几点、今天是几号（可以直接回答，无需工具）
+- 闲聊：天气怎么样、最近如何
 
-${toolDescriptions ? `可用工具列表（仅供参考，不要滥用）：\n${toolDescriptions}\n` : ''}
-${skillDescriptions ? `\n可用技能列表（仅供参考，不要滥用）：\n${skillDescriptions}\n` : ''}
+**需要工具的情况（needs_tools = true）：**
+- 数学计算：包含数字和运算符（+、-、*、/、括号）的计算请求
+- 明确说"计算"、"算一下"、"等于几"的数学问题
+- 随机数生成："随机生成数字"
+- 文件操作：读取、写入、分析文件
+- 代码执行：运行代码、执行脚本
+- 数据分析：统计分析、数据处理
+
+${toolDescriptions ? `可用工具列表：\n${toolDescriptions}\n` : ''}
+${skillDescriptions ? `\n可用技能列表：\n${skillDescriptions}\n` : ''}
 
 用户输入："""${input}"""
 
 请分析：
-1. 这是简单对话/闲聊，还是需要执行特定任务？
-2. 用户是否在询问时间、日期、天气等可以直接回答的信息？
+1. 这是不需要工具的闲聊/问候，还是需要工具的具体任务？
+2. 是否包含数学计算、文件操作、代码执行等明确需要工具的内容？
 3. 是否需要调用工具或技能来完成这个请求？
 4. 如果需要，哪些工具或技能最相关？
 
@@ -521,18 +531,28 @@ ${skillDescriptions ? `\n可用技能列表（仅供参考，不要滥用）：\
             return `Please analyze the following user input and determine if tools or skills need to be called.
 
 Important guidelines:
-- Simple conversation, greetings, asking about time/date/weather should be answered directly without tools
-- Only use tools when the user explicitly requests specific tasks (calculations, file operations, code execution, data analysis)
-- If the user is just asking for information or chatting, needs_tools should be false
+**NO tools needed (needs_tools = false):**
+- Greetings: hello, goodbye, thanks, etc.
+- Personal questions: what's your name, what can you do
+- Current time/date queries: what time is it, what's today's date (can answer directly)
+- Casual chat: how's the weather, how are you
 
-${toolDescriptions ? `Available tools (for reference only, use sparingly):\n${toolDescriptions}\n` : ''}
-${skillDescriptions ? `\nAvailable skills (for reference only, use sparingly):\n${skillDescriptions}\n` : ''}
+**TOOLS needed (needs_tools = true):**
+- Math calculations: requests with numbers and operators (+, -, *, /, parentheses)
+- Explicit calculation requests: "calculate", "compute", "equals"
+- Random number generation: "generate random number"
+- File operations: read, write, analyze files
+- Code execution: run code, execute script
+- Data analysis: statistical analysis, data processing
+
+${toolDescriptions ? `Available tools:\n${toolDescriptions}\n` : ''}
+${skillDescriptions ? `\nAvailable skills:\n${skillDescriptions}\n` : ''}
 
 User input: """${input}"""
 
 Please analyze:
-1. Is this simple conversation/chat, or a specific task to execute?
-2. Is the user asking about time, date, weather, etc. that can be answered directly?
+1. Is this casual chat/greeting or a concrete task requiring tools?
+2. Does it contain math calculations, file operations, code execution that clearly need tools?
 3. Do we need to call tools or skills to fulfill this request?
 4. If yes, which tools or skills are most relevant?
 
