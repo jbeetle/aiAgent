@@ -28,6 +28,9 @@ npm run dev
 # Run the interactive CLI
 npm run cli
 
+# Run CLI with verbose logging
+npm run cli:verbose
+
 # Run CLI with specific model
 node bin/cli.js --vendor OpenAI --model gpt-4
 
@@ -60,9 +63,9 @@ The framework exports four main namespaces from `src/index.js`:
 - Creates ReAct prompts dynamically based on available tools
 - Reads from `prompts.cn.js` or `prompts.en.js`
 
-### 2. `Conversation` Namespace (`src/agents/conversation/`)
+### 2. `Conversation` Namespace (`bin/conversation/`)
 
-**BaseLLMService** (`base.llm.service.js`): High-level conversation management service.
+**BaseLLMService** (`bin/conversation/base.llm.service.js`): High-level conversation management service.
 - Encapsulates SessionChat for cross-conversation context management
 - Implements intent recognition (keyword + LLM hybrid strategy)
 - Coordinates with ReActAgent for tool execution
@@ -87,13 +90,6 @@ The framework exports four main namespaces from `src/index.js`:
 - Implements sliding window and compression when thresholds are exceeded
 - Supports both regular `chat()` and streaming `streamChat()` modes
 
-**BaseLLMService** (`conversation/base.llm.service.js`): High-level conversation management layer.
-- Encapsulates SessionChat for cross-conversation context management
-- Implements intent recognition (keyword + LLM hybrid strategy)
-- Smart routing between direct chat and tool execution
-- Coordinates with ReActAgent for task execution
-- Key methods: `chat()`, `streamChat()`, `setReActAgent()`, `registerTools()`
-
 **McpClient** (`mcp.client.js`): MCP (Model Context Protocol) integration.
 - Connects to external MCP servers via HTTP or stdio
 - `chatWithMcpTools()` analyzes user intent and automatically invokes appropriate MCP tools
@@ -102,9 +98,15 @@ The framework exports four main namespaces from `src/index.js`:
 ### 4. `Tools` Namespace (`src/agents/tools/`)
 
 **Tool System** (`tool.js`):
-- Four built-in tools: calculator, random_number, advanced_calculator, get_current_time
+- Built-in tools: calculator, random_number, advanced_calculator, get_current_time
 - `createCustomTool()` factory for defining new tools with JSON Schema validation
 - `validateParameters()` implements JSON Schema validation for tool inputs
+
+**Additional Tools:**
+- `calculator.js` - Calculator with expression parsing
+- `code.executor.js` - Dynamic Node.js and Python code execution
+- `file.system.js` - File read/write operations
+- `shell.script.js` - Shell script execution
 
 **Tool Structure:**
 ```javascript
@@ -171,7 +173,13 @@ node bin/cli.js [options]
   -m, --model <name>       Model name (default: deepseek-chat)
   -s, --skills-dir <path>  Load skills directory at startup
   --verbose                Enable verbose logging
+  -h, --help               Show help
 ```
+
+**Intent Recognition** (`bin/intent.recognizer.js`):
+- Keyword-based fast path for common patterns (greetings, math, queries)
+- LLM-based confirmation for ambiguous inputs
+- Routes requests to direct chat or tool execution
 
 **Context Display:**
 The CLI banner shows: `Context: N messages` - indicating the current conversation context size.
@@ -313,3 +321,10 @@ VOLC_BASE_URL=...      # Custom base URL for Volcano
 - **Token Compression**: Automatically compresses history when token limit exceeded
 - **Threshold-based**: Compresses when messages > 15 or tokens > 64K
 - **Token Estimation**: Rough estimate: Chinese chars × 1.5 + English words × 1.3
+
+## Additional Documentation
+
+See the `docs/` folder for detailed documentation:
+- `docs/CLI.md` / `docs/CLI.en.md` - CLI usage guide
+- `docs/intent-recognition.md` - Intent recognition details
+- `docs/skill-design.md` - Skill design guide

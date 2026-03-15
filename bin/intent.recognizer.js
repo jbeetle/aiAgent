@@ -44,6 +44,9 @@ export class IntentRecognizer {
     static BUILTIN_KEYWORD_PATTERNS = {
         // 高置信度工具关键词 - 明确需要工具的场景
         toolKeywordsHigh: [
+            // 时间查询 - 需要工具获取准确时间
+            { pattern: /(?:现在|当前)?(?:几点|时间|日期|几号|星期几|几点钟)/i, reason: 'time_query' },
+            // 数学表达式
             { pattern: /计算[\s\d]+[\+\-\*\/\(\)]+/i, reason: 'math_expression' },
             { pattern: /[\d\s]+[\+\-\*\/\(\)]+[\d\s]+等于[\s\?]?/i, reason: 'math_question' },
             { pattern: /(?:算一下?|求|计算)\s*[\d\s\+\-\*\/\(\)\.]+/i, reason: 'math_calculation' },
@@ -52,6 +55,8 @@ export class IntentRecognizer {
             { pattern: /(?:生成|创建|写入)\s*(?:文件|代码|文档|报告)/i, reason: 'content_generation' },
             { pattern: /(?:分析|统计|处理)\s*(?:数据|日志|结果)/i, reason: 'data_analysis' },
             { pattern: /(?:调用|使用)\s*(?:工具|skill|技能)/i, reason: 'explicit_tool_call' },
+            // 随机数生成
+            { pattern: /(?:随机|random)\s*(?:生成|产生)?\s*(?:数字|数|号码|number)/i, reason: 'random_number' },
         ],
         // 中置信度工具关键词
         toolKeywordsMedium: [
@@ -71,7 +76,6 @@ export class IntentRecognizer {
             { keywords: ['名字', '叫什么', 'who are you', '你是谁'], reason: 'identity_question' },
             { keywords: ['帮助', 'help', '怎么用', '如何使用'], reason: 'help_request', condition: (input) => input.length < 20 },
             { keywords: ['天气', 'weather'], reason: 'weather_chat' },
-            { keywords: ['时间', 'time', '几点', '日期', 'date'], reason: 'time_chat' },
         ]
     };
 
@@ -793,13 +797,15 @@ Please respond in JSON format (no other text):
      */
     #inferToolsFromReason(reason) {
         const reasonToTool = {
+            'time_query': ['get_current_time'],
             'math_expression': ['calculator', 'advanced_calculator'],
             'math_question': ['calculator', 'advanced_calculator'],
             'math_calculation': ['calculator', 'advanced_calculator'],
             'code_execution': ['code_executor', 'script_runner'],
             'data_query': ['file_reader', 'data_query'],
             'content_generation': ['code_generator', 'file_writer'],
-            'data_analysis': ['analyzer', 'data_processor']
+            'data_analysis': ['analyzer', 'data_processor'],
+            'random_number': ['random_number']
         };
         return reasonToTool[reason] || [];
     }

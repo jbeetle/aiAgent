@@ -1,5 +1,6 @@
 import {SessionChat} from '../../src/agents/models/chat.session.js';
 import {createLogger} from '../../src/agents/utils/logger.js';
+import {IntentRecognizer} from '../intent.recognizer.js';
 
 /**
  * BaseLLMService - 基础 LLM 对话服务层
@@ -9,15 +10,16 @@ import {createLogger} from '../../src/agents/utils/logger.js';
  * 2. 基于对话历史理解用户真实意图，处理指代消解和省略补充
  * 3. 生成完整、明确的问题描述，交给 ReActAgent 全权处理
  *
+ * 注意：本服务不管理工具，工具由 ReActAgent 统一管理
+ *
  * 架构分层：
  * - 基础对话层：BaseLLMService (有状态，管理上下文 + 意图理解)
- * - 任务执行层：ReActAgent (无状态，自主决策是否使用工具)
+ * - 任务执行层：ReActAgent (无状态，管理内置工具 + 自主决策)
  */
 export class BaseLLMService {
     #log;
     #reactAgent = null;
-    #tools = [];
-    #skills = [];
+    #intentRecognizer = null;
 
     /**
      * 创建 BaseLLMService 实例
@@ -29,6 +31,7 @@ export class BaseLLMService {
      * @param {boolean} [config.verbose=false] - 启用详细日志
      * @param {boolean} [config.enableRefinement=true] - 是否启用问题完善（指代消解、省略补充）
      * @param {string} [config.language] - 语言 ('cn' | 'en')
+     * @param {string} [config.intentMode='balanced'] - 意图模式: 'aggressive' | 'conservative' | 'balanced'
      */
     constructor(llmClient, config = {}) {
         this.config = {
@@ -39,6 +42,7 @@ export class BaseLLMService {
             systemPrompt: null,
             enableRefinement: true,  // 是否启用问题完善
             language: process.env.PROMPTS_LANG || 'cn',
+            intentMode: 'balanced',  // 意图模式
             ...config
         };
 
@@ -55,6 +59,17 @@ export class BaseLLMService {
             verbose: this.config.verbose
         });
 
+        // 初始化 IntentRecognizer
+        this.#intentRecognizer = new IntentRecognizer(
+            llmClient,
+            this.model,
+            {
+                mode: this.config.intentMode,
+                language: this.config.language
+            },
+            this.config.verbose
+        );
+
         this.#log('BaseLLMService 初始化完成');
     }
 
@@ -68,26 +83,30 @@ export class BaseLLMService {
     }
 
     /**
-     * 注册可用工具
+     * 注册工具到 IntentRecognizer（用于语义匹配）
      * @param {Array} tools - 工具数组
      */
-    registerTools(tools) {
-        this.#tools = tools || [];
-        this.#log(`已注册 ${this.#tools.length} 个工具`);
+    registerToolsForIntent(tools) {
+        if (this.#intentRecognizer && tools) {
+            this.#intentRecognizer.registerTools(tools);
+            this.#log(`已注册 ${tools.length} 个工具到 IntentRecognizer`);
+        }
     }
 
     /**
-     * 注册可用技能
+     * 注册技能到 IntentRecognizer
      * @param {Array} skills - 技能数组
      */
-    registerSkills(skills) {
-        this.#skills = skills || [];
-        this.#log(`已注册 ${this.#skills.length} 个技能`);
+    registerSkillsForIntent(skills) {
+        if (this.#intentRecognizer && skills) {
+            this.#intentRecognizer.registerSkills(skills);
+            this.#log(`已注册 ${skills.length} 个技能到 IntentRecognizer`);
+        }
     }
 
     /**
      * 主入口：对话处理
-     * 新架构：简单查询直接由 SessionChat 处理，复杂查询交给 ReActAgent
+     * 新架构：通过意图识别和路由决策决定使用 SessionChat 还是 ReActAgent
      *
      * @param {string} input - 用户输入
      * @returns {Promise<Object>} - 响应结果
@@ -107,12 +126,12 @@ export class BaseLLMService {
                 };
             }
 
-            // 1. 基于对话历史理解用户意图，完善问题描述
+            // 1. 意图识别 + 问题完善
             const analysis = await this.analyzeIntent(input);
             this.#log('意图分析结果:', analysis);
 
-            // 2. 交给 ReActAgent 全权处理（ReActAgent 自主决定是否使用工具）
-            return await this.#executeWithTools(analysis.refinedQuery, analysis);
+            // 2. 路由决策
+            return await this.#route(input, analysis);
         } catch (error) {
             this.#log('对话处理错误:', error);
             return {
@@ -146,7 +165,7 @@ export class BaseLLMService {
 
     /**
      * 流式对话处理
-     * 新架构：简单查询直接由 SessionChat 处理，复杂查询交给 ReActAgent
+     * 新架构：通过意图识别和路由决策决定使用 SessionChat 还是 ReActAgent
      *
      * @param {string} input - 用户输入
      * @param {Function} onChunk - 流式回调函数
@@ -162,12 +181,27 @@ export class BaseLLMService {
                 return await this.#streamDirectChat(input, onChunk);
             }
 
-            // 1. 基于对话历史理解用户意图，完善问题描述
+            // 1. 意图识别 + 问题完善
             const analysis = await this.analyzeIntent(input);
             this.#log('意图分析结果:', analysis);
 
-            // 2. 交给 ReActAgent 全权处理（ReActAgent 自主决定是否使用工具）
-            return await this.#executeWithToolsStream(analysis.refinedQuery, analysis, onChunk);
+            // 2. 发送意图识别事件
+            if (onChunk) {
+                onChunk({
+                    type: 'intent_recognized',
+                    needsTools: analysis.needsTools,
+                    confidence: analysis.confidence,
+                    reason: analysis.reason,
+                    suggestedTools: analysis.suggestedTools,
+                    needsRefinement: analysis.needsRefinement,
+                    originalInput: analysis.originalInput,
+                    refinedQuery: analysis.refinedQuery,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            // 3. 路由决策
+            return await this.#routeStream(input, analysis, onChunk);
         } catch (error) {
             this.#log('流式对话错误:', error);
             if (onChunk) {
@@ -186,47 +220,65 @@ export class BaseLLMService {
     }
 
     /**
-     * 基于对话历史理解用户意图，生成完整、明确的问题描述
+     * 分析用户意图（整合意图识别 + 问题完善）
      *
      * 核心职责：
-     * 1. 基于对话历史理解用户真实意图
-     * 2. 处理指代消解（"它"指的是什么）
-     * 3. 补充省略的上下文
-     * 4. 生成完整、明确的问题描述
+     * 1. IntentRecognizer: 判断是否需要工具，返回 suggestedTools
+     * 2. 问题完善: 基于对话历史处理指代消解和省略补充
+     * 3. 生成完整、明确的问题描述
      *
      * @param {string} input - 用户当前输入
      * @returns {Promise<Object>} - 意图分析结果
-     *   - refinedQuery: 完善后的问题描述
-     *   - needsRefinement: 是否进行了完善
-     *   - originalInput: 原始输入
      */
     async analyzeIntent(input) {
         this.#log('分析用户意图:', input);
 
+        // 1. 意图识别（使用 IntentRecognizer）
+        let intentResult = {
+            needsTools: false,
+            confidence: 'low',
+            reason: 'default',
+            suggestedTools: [],
+            toolAnalysis: []
+        };
+
+        if (this.#intentRecognizer) {
+            try {
+                intentResult = await this.#intentRecognizer.recognize(input);
+                this.#log('IntentRecognizer 结果:', intentResult);
+            } catch (error) {
+                this.#log('意图识别失败:', error.message);
+            }
+        }
+
         // 获取对话历史（排除系统消息）
         const history = this.sessionChat.getHistory().filter(msg => msg.role !== 'system');
 
-        // 快速路径：第一轮对话或非常明确的输入，直接返回
-        if (this.#shouldSkipRefinement(input, history)) {
-            this.#log('跳过意图完善，直接返回原输入');
-            return {
+        // 2. 问题完善（指代消解）
+        let refinementResult;
+        if (this.#shouldSkipRefinement(input, history) || !this.config.enableRefinement) {
+            refinementResult = {
                 refinedQuery: input,
                 needsRefinement: false,
                 originalInput: input
             };
+        } else {
+            refinementResult = await this.#refineQuery(input, history);
         }
 
-        // 如果禁用了问题完善功能，直接返回原输入
-        if (!this.config.enableRefinement) {
-            return {
-                refinedQuery: input,
-                needsRefinement: false,
-                originalInput: input
-            };
-        }
+        // 合并结果
+        return {
+            ...intentResult,
+            ...refinementResult
+        };
+    }
 
+    /**
+     * 问题完善（指代消解）
+     * @private
+     */
+    async #refineQuery(input, history) {
         try {
-            // 基于历史对话理解用户意图
             const prompt = this.#createIntentAnalysisPrompt(input, history);
 
             const response = await this.llmClient.getRawClient().chat.completions.create({
@@ -246,7 +298,6 @@ export class BaseLLMService {
 
             const refinedQuery = response.choices[0].message.content.trim();
 
-            // 如果完善后的结果与原输入相同或为空，使用原输入
             if (!refinedQuery || refinedQuery === input) {
                 return {
                     refinedQuery: input,
@@ -255,22 +306,19 @@ export class BaseLLMService {
                 };
             }
 
-            this.#log('意图完善结果:', refinedQuery);
+            this.#log('问题完善结果:', refinedQuery);
 
             return {
                 refinedQuery,
                 needsRefinement: true,
                 originalInput: input
             };
-
         } catch (error) {
-            this.#log('意图分析失败，使用原输入:', error.message);
-            // 出错时返回原输入
+            this.#log('问题完善失败:', error.message);
             return {
                 refinedQuery: input,
                 needsRefinement: false,
-                originalInput: input,
-                error: error.message
+                originalInput: input
             };
         }
     }
@@ -372,10 +420,124 @@ Return only the refined question, no explanations.`;
     }
 
     /**
-     * 使用工具执行任务（非流式）
+     * 路由决策（非流式）
+     * 根据意图识别结果决定使用直接对话还是 ReActAgent
      * @private
      */
-    async #executeWithTools(refinedQuery, analysis) {
+    async #route(input, analysis) {
+        const { needsTools, confidence } = analysis;
+        const mode = this.config.intentMode || 'balanced';
+
+        this.#log(`路由决策: needsTools=${needsTools}, confidence=${confidence}, mode=${mode}`);
+
+        // 场景1: 需要工具
+        if (needsTools) {
+            // 无论置信度高低，都交给 ReActAgent
+            this.#log('路由: ReActAgent (needsTools=true)');
+            return await this.#executeWithAgent(analysis.refinedQuery, analysis);
+        }
+
+        // 场景2: 不需要工具
+        if (!needsTools) {
+            // 高/中置信度：直接对话
+            if (confidence === 'high' || confidence === 'medium') {
+                this.#log('路由: SessionChat (needsTools=false, high/medium confidence)');
+                return await this.#directChat(input);
+            }
+
+            // 低置信度：根据模式决定
+            if (mode === 'conservative') {
+                // 保守模式：倾向对话
+                this.#log('路由: SessionChat (conservative mode, low confidence)');
+                return await this.#directChat(input);
+            } else {
+                // 激进/平衡模式：交给 Agent
+                this.#log(`路由: ReActAgent (${mode} mode, low confidence)`);
+                return await this.#executeWithAgent(analysis.refinedQuery, analysis);
+            }
+        }
+    }
+
+    /**
+     * 路由决策（流式）
+     * 根据意图识别结果决定使用直接对话还是 ReActAgent
+     * @private
+     */
+    async #routeStream(input, analysis, onChunk) {
+        const { needsTools, confidence } = analysis;
+        const mode = this.config.intentMode || 'balanced';
+
+        // 发送路由事件
+        this.#sendRoutingEvent(onChunk, {
+            needsTools,
+            confidence,
+            mode,
+            target: null
+        });
+
+        // 场景1: 需要工具
+        if (needsTools) {
+            this.#sendRoutingEvent(onChunk, { target: 'reactAgent', reason: 'needsTools=true' });
+            this.#log('路由: ReActAgent (needsTools=true)');
+            return await this.#executeWithAgentStream(analysis.refinedQuery, analysis, onChunk);
+        }
+
+        // 场景2: 不需要工具
+        if (!needsTools) {
+            // 高/中置信度：直接对话
+            if (confidence === 'high' || confidence === 'medium') {
+                this.#sendRoutingEvent(onChunk, { target: 'sessionChat', reason: 'needsTools=false, high/medium confidence' });
+                this.#log('路由: SessionChat (needsTools=false, high/medium confidence)');
+                return await this.#streamDirectChat(input, onChunk);
+            }
+
+            // 低置信度：根据模式决定
+            if (mode === 'conservative') {
+                this.#sendRoutingEvent(onChunk, { target: 'sessionChat', reason: 'conservative mode, low confidence' });
+                this.#log('路由: SessionChat (conservative mode, low confidence)');
+                return await this.#streamDirectChat(input, onChunk);
+            } else {
+                this.#sendRoutingEvent(onChunk, { target: 'reactAgent', reason: `${mode} mode, low confidence` });
+                this.#log(`路由: ReActAgent (${mode} mode, low confidence)`);
+                return await this.#executeWithAgentStream(analysis.refinedQuery, analysis, onChunk);
+            }
+        }
+    }
+
+    /**
+     * 发送路由事件
+     * @private
+     */
+    #sendRoutingEvent(onChunk, data) {
+        if (onChunk) {
+            onChunk({
+                type: 'routing',
+                ...data,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    /**
+     * 直接对话（无流式）
+     * @private
+     */
+    async #directChat(input) {
+        const response = await this.sessionChat.chat(input);
+
+        return {
+            success: true,
+            answer: response,
+            type: 'direct'
+        };
+    }
+
+    /**
+     * 使用 ReActAgent 执行任务（非流式）
+     * 只传递完善后的问题，不传工具（ReActAgent 内置工具）
+     * @private
+     */
+    async #executeWithAgent(refinedQuery, analysis) {
         if (!this.#reactAgent) {
             throw new Error('ReActAgent 未设置，无法执行工具调用');
         }
@@ -383,12 +545,11 @@ Return only the refined question, no explanations.`;
         // 获取当前上下文
         const contextMessages = this.sessionChat.getHistory();
 
-        // 调用 ReActAgent 执行任务（传递完善后的问题）
+        // 调用 ReActAgent 执行任务（只传递完善后的问题和上下文）
+        // 注意：不传 tools，ReActAgent 使用内置工具
         const taskConfig = {
             query: refinedQuery,
-            contextMessages: contextMessages,
-            tools: this.#tools,
-            suggestedTools: analysis.suggestedTools || []
+            contextMessages: contextMessages
         };
 
         const result = await this.#reactAgent.executeTask(taskConfig);
@@ -407,10 +568,11 @@ Return only the refined question, no explanations.`;
     }
 
     /**
-     * 使用工具执行任务（流式）
+     * 使用 ReActAgent 执行任务（流式）
+     * 只传递完善后的问题，不传工具（ReActAgent 内置工具）
      * @private
      */
-    async #executeWithToolsStream(refinedQuery, analysis, onChunk) {
+    async #executeWithAgentStream(refinedQuery, analysis, onChunk) {
         if (!this.#reactAgent) {
             throw new Error('ReActAgent 未设置，无法执行工具调用');
         }
@@ -438,12 +600,11 @@ Return only the refined question, no explanations.`;
         // 获取当前上下文
         const contextMessages = this.sessionChat.getHistory();
 
-        // 调用 ReActAgent 执行流式任务（传递完善后的问题）
+        // 调用 ReActAgent 执行流式任务
+        // 注意：不传 tools，ReActAgent 使用内置工具
         const taskConfig = {
             query: refinedQuery,
-            contextMessages: contextMessages,
-            tools: this.#tools,
-            suggestedTools: analysis.suggestedTools || []
+            contextMessages: contextMessages
         };
 
         let finalAnswer = '';
@@ -562,9 +723,9 @@ Notes:
     getStats() {
         return {
             ...this.sessionChat.getStats(),
-            toolsCount: this.#tools.length,
-            skillsCount: this.#skills.length,
-            hasReActAgent: !!this.#reactAgent
+            hasReActAgent: !!this.#reactAgent,
+            intentMode: this.config.intentMode,
+            enableRefinement: this.config.enableRefinement
         };
     }
 

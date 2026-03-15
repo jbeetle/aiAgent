@@ -195,7 +195,7 @@ export const advancedCalculatorTool = {
  */
 export const getCurrentTimeTool = {
     name: 'get_current_time',
-    description: 'Get the current time in YYYY-MM-DD HH:mm:ss format. Only use when the user explicitly asks for current time or date as part of a task. For simple conversational questions like "what time is it" or "what\'s today\'s date", answer directly without using this tool.',
+    description: 'Get the current date and time. Returns the current time in YYYY-MM-DD HH:mm:ss format. Use this tool whenever user asks about current time, date, day of week, etc.',
     parameters: {
         type: 'object',
         properties: {},
