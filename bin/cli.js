@@ -158,6 +158,9 @@ class CLIAgent {
             this.baseLLMService.setReActAgent(this.reactAgent);
             this.baseLLMService.registerTools(this.tools);
 
+            // 自动加载内置 skills
+            await this.#loadBuiltinSkills();
+
             // 创建 readline 接口
             this.rl = readline.createInterface({
                 input,
@@ -274,9 +277,6 @@ class CLIAgent {
             case '/ls':
                 this.listSkills();
                 break;
-            case '/builtin':
-                await this.loadBuiltinSkills();
-                break;
             case '/clear':
                 this.clearHistory();
                 break;
@@ -331,7 +331,6 @@ ${colors.yellow}Skill 管理:${colors.reset}
   /unload <skillname>    卸载指定 skill
   /reload <skillname>    重新加载 skill
   /list                  列出所有已加载的 skills
-  /builtin               加载内置 skills
 
 ${colors.yellow}对话控制:${colors.reset}
   /clear                 清除对话历史
@@ -467,21 +466,16 @@ ${colors.dim}直接输入文本开始与 Agent 对话${colors.reset}
     }
 
     /**
-     * 加载内置 Skills
+     * 加载内置 Skills（私有方法，初始化时自动调用）
      */
-    async loadBuiltinSkills() {
+    async #loadBuiltinSkills() {
         try {
             const skills = await this.reactAgent.skillManager.loadBuiltinSkills();
-            if (skills.length === 0) {
-                log.warning('没有内置 skills 或目录不存在');
-            } else {
-                log.success(`成功加载 ${skills.length} 个内置 skills`);
-                skills.forEach(skill => {
-                    console.log(`  ${colors.cyan}•${colors.reset} ${skill.name}`);
-                });
+            if (skills.length > 0) {
+                this.#log(`自动加载 ${skills.length} 个内置 skills: ${skills.map(s => s.name).join(', ')}`);
             }
         } catch (error) {
-            log.error(`加载失败: ${error.message}`);
+            this.#log(`内置 skills 加载失败: ${error.message}`);
         }
     }
 
