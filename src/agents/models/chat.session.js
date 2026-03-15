@@ -284,8 +284,8 @@ export class SessionChat {
     }
 
     #compressWord(txt) {
-        const compressPrompt_cn = `先前的对话摘要：\n\n${txt}`;
-        const compressPrompt_en = `Previous conversation summary:\n\n${txt}`;
+        const compressPrompt_cn = `[对话历史摘要] 以下是对话历史的简要回顾，包含关键事实和上下文：\n\n${txt}\n\n[摘要结束，继续当前对话]`;
+        const compressPrompt_en = `[Conversation Summary] Below is a brief review of the conversation history, including key facts and context:\n\n${txt}\n\n[Summary ends, continue current conversation]`;
         const lang = process.env.PROMPTS_LANG;
         if (lang) {
             return lang === 'cn' ? compressPrompt_cn : compressPrompt_en;
@@ -321,8 +321,8 @@ export class SessionChat {
     }
 
     #summaryWord(txt) {
-        const summaryPrompt_cn = `请简要总结此对话（最多100个词），重点是关键信息和决策：\n\n${txt}`;
-        const summaryPrompt_en = `Briefly summarize this conversation (max 100 words), focusing on key information and decisions:\n\n${txt}`;
+        const summaryPrompt_cn = `请对以下对话进行简要总结（最多100个词）。总结应包含：\n1. 用户的主要问题或需求\n2. 关键事实和信息\n3. 用户的偏好或重要观点（如有）\n\n对话内容：\n${txt}`;
+        const summaryPrompt_en = `Please provide a brief summary of the following conversation (max 100 words). The summary should include:\n1. The user's main questions or needs\n2. Key facts and information\n3. User preferences or important viewpoints (if any)\n\nConversation content:\n${txt}`;
         const lang = process.env.PROMPTS_LANG;
         if (lang) {
             return lang === 'cn' ? summaryPrompt_cn : summaryPrompt_en;
@@ -505,11 +505,14 @@ export class SessionChat {
 
     /**
      * 估算token数量
+     * 使用更精确的估算公式：
+     * - 中文汉字：约1.5 tokens/字
+     * - 英文单词：约1.3 tokens/词
+     * - 数字和标点：约0.5 tokens/字符
+     * - 添加基础开销（消息格式开销）
      * @returns {number} - 估算的token数量
      */
     estimateTokens() {
-        // 粗略估算：中文字符 * 1.5 + 英文单词 * 1.3
-
         // 缓存命中检查（仅当没有新消息且版本匹配时）
         if (this.messages.length === this.lastMessageCount &&
             this.tokenCache.has('total') &&
@@ -535,16 +538,29 @@ export class SessionChat {
         // 增量计算：只计算新消息
         for (let i = this.lastMessageCount; i < this.messages.length; i++) {
             const m = this.messages[i];
-            const chineseChars = (m.content.match(/[\u4e00-\u9fff]/g) || []).length;
-            const englishWords = (m.content.match(/[a-zA-Z]+/g) || []).length;
-            this.totalTokens += chineseChars * 1.5 + englishWords * 1.3;
+            const content = m.content || '';
+
+            // 更精确的token估算
+            const chineseChars = (content.match(/[\u4e00-\u9fff]/g) || []).length;
+            const englishWords = (content.match(/[a-zA-Z]+/g) || []).length;
+            const numbersAndPunct = (content.match(/[0-9\p{P}\p{S}]/gu) || []).length;
+            const otherChars = content.length - chineseChars - englishWords - numbersAndPunct;
+
+            // 每条消息的基础开销（角色标识等）
+            const baseOverhead = 4;
+
+            this.totalTokens += baseOverhead +
+                chineseChars * 1.5 +
+                englishWords * 1.3 +
+                numbersAndPunct * 0.5 +
+                otherChars * 0.3;
         }
 
         this.lastMessageCount = this.messages.length;
         this.tokenCache.set('total', this.totalTokens);
         this.tokenCache.set('version', this.tokenVersion);
 
-        return this.totalTokens;
+        return Math.ceil(this.totalTokens);
     }
 
     /**

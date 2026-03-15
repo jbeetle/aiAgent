@@ -519,7 +519,8 @@ Return only the refined question, no explanations.`;
     }
 
     /**
-     * 创建系统提示
+     * 创建系统提示（专用于 SessionChat 的直接对话）
+     * 注意：SessionChat 只处理简单对话（问候、闲聊等），不涉及工具调用
      * @private
      */
     #createSystemPrompt() {
@@ -530,17 +531,27 @@ Return only the refined question, no explanations.`;
         const isCN = this.config.language === 'cn';
 
         if (isCN) {
-            return `你是一个 helpful AI 助手。你可以：
-1. 进行自然对话，回答一般性问题
-2. 在需要时调用工具来执行特定任务
+            return `你是一个友好、专业的 AI 对话助手。
 
-请保持友好、专业的态度，并尽可能提供准确有用的信息。`;
+你的职责：
+1. 进行自然、流畅的对话
+2. 回答用户的一般性问题
+3. 保持友好、耐心的态度
+
+注意事项：
+- 对于需要计算、查询等复杂任务，建议用户使用具体指令
+- 保持回答简洁、准确、有帮助`;
         } else {
-            return `You are a helpful AI assistant. You can:
-1. Have natural conversations and answer general questions
-2. Call tools when needed to perform specific tasks
+            return `You are a friendly and professional AI conversation assistant.
 
-Please be friendly, professional, and provide accurate and useful information.`;
+Your responsibilities:
+1. Engage in natural, fluent conversations
+2. Answer general questions from users
+3. Maintain a friendly and patient attitude
+
+Notes:
+- For complex tasks like calculations or queries, suggest users use specific commands
+- Keep responses concise, accurate, and helpful`;
         }
     }
 
