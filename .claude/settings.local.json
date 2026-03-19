@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "mcp__context7__get-library-docs",
+      "WebSearch",
+      "Bash(node:*)",
+      "WebFetch(domain:mcp.api-inference.modelscope.net)",
+      "Bash(curl:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(echo \"=== Final Syntax Check ===\" && \\\\\nfor f in src/agents/models/mcp.client.js src/agents/models/llm.client.js src/agents/models/chat.session.js src/agents/models/model.factory.js src/agents/react.agent.js src/agents/utils/logger.js; do\n  node --check \"$f\" 2>&1 && echo \"✓ $f\" || echo \"✗ $f FAILED\"\ndone)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "mcp__web-search-prime__web_search_prime",
+      "WebFetch(domain:117.72.109.229)",
+      "Bash(git reset:*)",
+      "mcp__chrome-devtools__navigate_page",
+      "Bash(printf '/builtin\\\\n/list\\\\n/exit\\\\n' | node bin/cli.js 2>&1)",
+      "Bash(find . -maxdepth 3 -type f -name \"*.md\" -o -name \"package.json\" -o -name \"CLAUDE.md\" -o -name \".cursorrules\" 2>/dev/null | head -30)",
+      "Bash(echo \"=== Project Structure ===\" && echo \"\" && \\\\\necho \".\" && \\\\\nls -1 *.md *.json .env.example .gitignore 2>/dev/null | sed 's/^/├── /' && echo \"\" && \\\\\necho \"bin/\" && ls -1 bin/ | sed 's/^/├── /' && echo \"\" && \\\\\necho \"docs/\" && ls -1 docs/ | sed 's/^/├── /' && echo \"\" && \\\\\necho \"src/\" && \\\\\necho \"├── agents/\" && ls -1 src/agents/*.js 2>/dev/null | sed 's|src/agents/|│   ├── |' && \\\\\necho \"│   ├── models/\" && ls -1 src/agents/models/*.js | sed 's|src/agents/models/|│   │   ├── |' && \\\\\necho \"│   ├── tools/\" && ls -1 src/agents/tools/*.js | sed 's|src/agents/tools/|│   │   ├── |' && \\\\\necho \"│   └── utils/\" && ls -1 src/agents/utils/*.js | sed 's|src/agents/utils/|│   │   ├── |' && \\\\\necho \"├── skills/\" && ls -1 src/skills/*.js | sed 's|src/skills/|│   ├── |' && \\\\\necho \"│   └── builtin/\" && ls -1 src/skills/builtin/*.json | sed 's|src/skills/builtin/|│   │   ├── |' && \\\\\necho \"└── index.js\" && echo \"\" && \\\\\necho \"examples/\" && ls -1 examples/*.js 2>/dev/null | head -5 | sed 's/^/├── /' && echo \"└── ...\" && echo \"\" && \\\\\necho \"test/\" && ls -1 test/*.js 2>/dev/null | head -3 | sed 's/^/├── /' && echo \"└── ...\")",
+      "Bash(npm run:*)",
+      "Bash(ping -n 3 github.com 2>&1 || echo \"Network check complete\")",
+      "Bash(git config:*)",
+      "Bash(ls -la examples/*.skill.md 2>&1)",
+      "Bash(pkill -f \"node --use-system-ca bin/cli.js\" 2>/dev/null || true)",
+      "Bash(printf '/load examples/browser-automation.skill.md\\\\n/list\\\\n你好，请介绍一下 browser automation 技能\\\\n/exit\\\\n' | npm run cli)",
+      "Bash(echo -e \"/builtin\\\\n请帮我审查以下代码\\\\n\\\\`\nfunction calculate\\(x, y\\) {\n  return x + y;\n}\n\\\\`\\\\n/exit\" | node bin/cli.js 2>&1 | head -100)",
+      "Bash(ping -c 3 github.com 2>&1 || echo \"Ping test complete\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
