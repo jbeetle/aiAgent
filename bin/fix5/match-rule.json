@@ -1,0 +1,227 @@
+{
+  "semanticRules": [
+    {
+      "scenario": "用户要列出目录内容、浏览文件夹、查看某路径下有哪些文件、列盘符或根目录",
+      "skills": [],
+      "tools": ["list"],
+      "confidence": 0.85,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywordGroups": [
+        ["列出", "列", "看看", "查看", "浏览", "有哪些", "有什么"],
+        ["目录", "文件夹", "盘符", "根目录", "盘"]
+      ],
+      "note": "不要用 exec 的 dir/Get-ChildItem；沙箱外路径 list 也会拒绝，仅列工作区/沙箱内目录"
+    },
+    {
+      "scenario": "用户直接输入命令行指令 ls / dir，列出当前目录",
+      "skills": [],
+      "tools": ["list"],
+      "confidence": 0.85,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywords": ["ls", "dir"],
+      "maxLength": 10,
+      "minKeywordMatches": 1,
+      "note": "完整命令式输入（ls/dir）直接快速匹配 list；词边界匹配避免 xlsx 等误中"
+    },
+    {
+      "scenario": "用户要对Excel/CSV文件进行简单读写（读取内容、写入数据），非统计分析",
+      "skills": [],
+      "tools": ["read", "write"],
+      "confidence": 0.9,
+      "fastMatch": true,
+      "keywordGroups": [
+        ["excel", "xlsx", "xls", "csv", "电子表格"],
+        ["读取", "读出", "写入", "编辑", "修改", "更新", "read", "write"]
+      ],
+      "note": "简单读写Excel/CSV内容用read/write工具。统计分析、透视表、图表等复杂操作使用data-analysis技能"
+    },
+    {
+      "scenario": "用户说'打开'、'查看'、'看看'，想用系统默认程序打开/预览文件或网页",
+      "skills": [],
+      "tools": ["open"],
+      "confidence": 0.85,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywordGroups": [
+        ["打开", "open", "查看", "看看", "预览", "播放"],
+        [
+          "文件",
+          "文档",
+          "图片",
+          "照片",
+          "图像",
+          "视频",
+          "电影",
+          "音乐",
+          "音频",
+          "网页",
+          "网站",
+          "链接",
+          "网址",
+          "文件夹",
+          "浏览器",
+          "pdf",
+          "excel",
+          "word",
+          "ppt",
+          "xlsx",
+          "docx",
+          "pptx",
+          "csv",
+          "txt",
+          "md",
+          "mp4",
+          "mp3",
+          "jpg",
+          "jpeg",
+          "png",
+          "gif",
+          "epub"
+        ]
+      ],
+      "maxLength": 12,
+      "note": "动作词+明确对象词同时出现才快速匹配 open；单独'打开'、'查看日志'等模糊请求交给 LLM 匹配器"
+    },
+    {
+      "scenario": "用户要求总结PDF文档、提取要点、生成摘要",
+      "skills": ["pdf-summary"],
+      "tools": [],
+      "confidence": 0.85,
+      "fastMatch": true,
+      "keywordGroups": [
+        ["pdf"],
+        ["总结", "摘要", "概要", "提炼", "要点", "summarize", "summary"]
+      ],
+      "note": "总结/提取PDF文档要点使用pdf-summary技能"
+    },
+    {
+      "scenario": "用户说'继续用它'、'再用'、'继续上次的'、'和上次一样'，表示延续上一轮对话的操作",
+      "skills": [],
+      "tools": [],
+      "confidence": 0.95,
+      "followContext": true,
+      "note": "必须从上下文推断上一步使用的具体技能/工具，填入 relevantSkills/relevantTools，不可留空"
+    },
+    {
+      "scenario": "用户说'不对'、'不是'、'换个'、'重新来'、'不是这个'，表示否定前一轮的操作",
+      "skills": [],
+      "tools": [],
+      "confidence": 0.9,
+      "followContext": true,
+      "note": "必须从上下文推断上一步使用的技能并排除，选择替代技能/工具填入 relevantSkills/relevantTools"
+    },
+    {
+      "scenario": "用户表达夸奖、批评等纯情绪反馈",
+      "skills": [],
+      "tools": [],
+      "confidence": 0.1,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywords": [
+        "你真棒",
+        "你太棒了",
+        "太棒了",
+        "真棒",
+        "给你加鸡腿",
+        "垃圾",
+        "你太差了",
+        "真烂",
+        "great",
+        "awesome",
+        "amazing",
+        "good job",
+        "well done",
+        "terrible",
+        "useless"
+      ],
+      "minKeywordMatches": 1,
+      "maxLength": 10,
+      "note": "无需技能，直接回答。仅匹配完整表达式，不用'很好/非常好/不行'等可能出现在任务上下文中的泛化词"
+    },
+    {
+      "scenario": "用户说谢谢、再见、OK等礼貌用语或结束语",
+      "skills": [],
+      "tools": [],
+      "confidence": 0.1,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywords": [
+        "谢谢",
+        "thanks",
+        "thank",
+        "多谢",
+        "再见",
+        "bye",
+        "goodbye",
+        "拜拜",
+        "ok"
+      ],
+      "minKeywordMatches": 1,
+      "maxLength": 8,
+      "note": "无需技能，直接回答"
+    },
+    {
+      "scenario": "用户询问当前时间、日期、星期几",
+      "skills": [],
+      "tools": ["time"],
+      "confidence": 0.85,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywords": [
+        "现在几点",
+        "星期几",
+        "今天几号",
+        "当前时间",
+        "what time",
+        "what day"
+      ],
+      "minKeywordMatches": 1,
+      "maxLength": 9,
+      "note": "查询时间/日期使用time工具"
+    },
+    {
+      "scenario": "用户打招呼、问候、寒暄",
+      "skills": [],
+      "tools": [],
+      "confidence": 0.1,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywords": [
+        "hi",
+        "hello",
+        "hey",
+        "你好",
+        "您好",
+        "早上好",
+        "晚上好",
+        "晚安",
+        "在吗",
+        "你是谁",
+        "who"
+      ],
+      "minKeywordMatches": 1,
+      "maxLength": 6,
+      "note": "无需技能，直接回答"
+    },
+    {
+      "scenario": "用户只是询问通用知识、概念解释、什么是XXX",
+      "skills": [],
+      "tools": [],
+      "confidence": 0.1,
+      "fastMatch": true,
+      "promptExclude": true,
+      "keywords": ["什么是", "什么原因"],
+      "minKeywordMatches": 1,
+      "maxLength": 10,
+      "note": "无需技能，直接回答；仅匹配纯问句，'做个介绍/写文档'等生成指令不快速命中，交给 LLM 匹配器"
+    }
+  ],
+  "confidenceGuidelines": {
+    "0.9-1.0": "明确匹配",
+    "0.7-0.9": "语义匹配",
+    "0.5-0.7": "工具可满足",
+    "below0.5": "无需技能，返回空"
+  }
+}
